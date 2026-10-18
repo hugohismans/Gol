@@ -167,7 +167,7 @@
       border-radius: 16px 16px 0 0;
     }
 
-    .toggle {
+    .toggle.on {
       top: auto;
       bottom: calc(62vh + 8px);
     }
