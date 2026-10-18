@@ -129,7 +129,7 @@ export class Engine {
     const v = this.currentView();
     this.renderer.render(
       this.gpu.textures, this.canvas.width, this.canvas.height, v, this.layer,
-      (now - this.startTime) / 1000, daylight(this.sim.tick),
+      (now - this.startTime) / 1000, daylight(this.sim.tick), this.sim.stats.meanSediment,
     );
 
     if (now - this.lastUi > UI_REFRESH_MS) {

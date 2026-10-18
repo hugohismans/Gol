@@ -204,6 +204,7 @@ export class Organisme {
       livingLineages: areas.size,
       totalLineages: this.lineages.size,
       meanNutrients: nutrients / n,
+      meanSediment: this.meanSediment(),
     };
     const events = this.rng.poisson(this.params.sublineageRate * living * elapsed);
     for (let e = 0; e < events; e++) this.spawnSublineage(st);
@@ -266,7 +267,14 @@ export class Organisme {
   // --- Interne -----------------------------------------------------------
 
   private emptyStats(): SimStats {
-    return { tick: 0, livingCells: 0, biomass: 0, livingLineages: 0, totalLineages: 0, meanNutrients: 1 };
+    return { tick: 0, livingCells: 0, biomass: 0, livingLineages: 0, totalLineages: 0, meanNutrients: 1, meanSediment: 0 };
+  }
+
+  private meanSediment(): number {
+    const se = this.backend.read(SED);
+    let total = 0;
+    for (let i = 3; i < se.length; i += 4) total += se[i];
+    return total / (this.size * this.size);
   }
 
   private seed(): number {

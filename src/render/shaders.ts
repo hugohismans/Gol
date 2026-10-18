@@ -11,7 +11,8 @@ uniform sampler2D uState;
 uniform sampler2D uAux;
 uniform sampler2D uSed;
 uniform float uAliveT;
-uniform float uSedScale;
+uniform float uSedRef;
+uniform float uSedMaturity;
 layout(location = 0) out vec4 oLife;
 layout(location = 1) out vec4 oGround;
 layout(location = 2) out vec4 oField;
@@ -23,7 +24,7 @@ void main() {
   vec4 sed = texelFetch(uSed, p, 0);
   float v = s.z > 0.5 ? s.x : 0.0;
   oLife = vec4(hueColor(a.x) * v, v);
-  oGround = vec4(sed.rgb, 1.0 - exp(-sed.a * uSedScale));
+  oGround = vec4(sed.rgb, smoothstep(0.15, 1.9, sed.a / uSedRef) * uSedMaturity);
   oField = vec4(s.y, a.z, s.x >= uAliveT ? 0.0 : a.y, fract(a.x));
 }
 `;

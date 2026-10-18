@@ -13,8 +13,12 @@ const LAYER_INDEX: Record<Layer, number> = { final: 0, vitalite: 1, lignees: 2, 
 /** Comment le monde carré occupe l'écran. */
 export type ViewMode = 'mosaique' | 'couvrir' | 'contenir';
 
-/** Épaisseur de sédiment qui donne une couverture d'environ 63 %. */
-const SEDIMENT_VISUAL_SCALE = 1.5;
+/**
+ * Le sédiment s'affiche relativement à son épaisseur moyenne (ce qui raconte
+ * l'histoire), atténué tant que le monde est jeune : couverture globale
+ * 1 - exp(-moyenne / SEDIMENT_MATURITY).
+ */
+const SEDIMENT_MATURITY = 0.3;
 
 /** Durée d'affichage de l'anneau d'une spore déposée. */
 const SPORE_MARK_SECONDS = 2;
@@ -74,7 +78,9 @@ export class Renderer {
     if (this.spores.length > 8) this.spores.shift();
   }
 
-  render(t: SimTextures, width: number, height: number, view: View, layer: Layer, time: number, daylight: number): void {
+  render(
+    t: SimTextures, width: number, height: number, view: View, layer: Layer, time: number, daylight: number, meanSediment: number,
+  ): void {
     const gl = this.gl;
     gl.bindVertexArray(this.vao);
     gl.disable(gl.BLEND);
@@ -82,7 +88,8 @@ export class Renderer {
     gl.viewport(0, 0, this.size, this.size);
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo);
     this.prep.use().tex('uState', 0, t.state).tex('uAux', 1, t.aux).tex('uSed', 2, t.sediment);
-    this.prep.f('uAliveT', ALIVE_THRESHOLD).f('uSedScale', SEDIMENT_VISUAL_SCALE);
+    this.prep.f('uAliveT', ALIVE_THRESHOLD).f('uSedRef', Math.max(meanSediment, 1e-4));
+    this.prep.f('uSedMaturity', 1 - Math.exp(-meanSediment / SEDIMENT_MATURITY));
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     for (const tex of [this.life, this.ground, this.field]) {
       gl.bindTexture(gl.TEXTURE_2D, tex);

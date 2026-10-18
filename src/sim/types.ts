@@ -64,4 +64,6 @@ export interface SimStats {
   livingLineages: number;
   totalLineages: number;
   meanNutrients: number;
+  /** Épaisseur moyenne du sédiment. */
+  meanSediment: number;
 }
