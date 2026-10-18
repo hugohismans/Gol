@@ -23,6 +23,9 @@ Il faut un navigateur avec WebGL2 et `EXT_color_buffer_float` (tous les navigate
 - « +1 jour » et « +1 mois » jouent le temps simulé aussi vite que possible (une barre de progression permet d'annuler).
 - « réglages » ouvre le panneau : calques (final, vitalité, lignées, nutriments, sédiment), cadrage (mosaïque du tore, couvrir, contenir), reset, seed aléatoire, et toutes les constantes de `src/sim/config.ts`, appliquées en direct.
 - L'état est sauvegardé dans localStorage toutes les 20 secondes et quand la page passe en arrière plan. Les constantes réglées font partie de la sauvegarde (« valeurs par défaut » les remet à zéro).
+- « mes spores » liste tes dépôts : vivante ou éteinte, surface, descendantes. Une spore choisie est mise en évidence dans le monde ; sa fiche montre sa courbe d'étendue et ce qui lui est arrivé. Toucher la courbe ou une date fait revenir le monde à cet instant ; « revoir son histoire » rejoue tout depuis le dépôt.
+- Les instantanés du passé (un toutes les 4 h simulées, puis un par jour au delà de 7 jours) sont gardés dans IndexedDB.
+- `?taille=128` lance un monde plus petit, séparé du vrai monde, pour tester vite.
 - Dans la console : `engine.organisme` donne accès direct à la simulation.
 
 ## Architecture

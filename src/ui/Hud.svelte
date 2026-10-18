@@ -34,6 +34,7 @@
     align-items: flex-start;
     gap: 12px;
     pointer-events: none;
+    z-index: 3;
     text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8);
   }
 

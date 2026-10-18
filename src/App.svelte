@@ -5,10 +5,17 @@
   import TimeBar from './ui/TimeBar.svelte';
   import MutationBar from './ui/MutationBar.svelte';
   import DebugPanel from './ui/DebugPanel.svelte';
+  import MySpores from './ui/MySpores.svelte';
+  import ReplayBar from './ui/ReplayBar.svelte';
 
   const engine = new Engine();
   let canvas: HTMLCanvasElement;
   let down: { x: number; y: number; t: number } | null = null;
+
+  // Hauteur du panneau « mes spores » sur mobile : plus bas pendant la relecture pour laisser voir le monde.
+  $effect(() => {
+    document.documentElement.style.setProperty('--sheet', engine.replay ? '40vh' : '62vh');
+  });
 
   onMount(() => {
     const ro = new ResizeObserver(() => engine.resize(canvas, canvas.clientWidth, canvas.clientHeight));
@@ -42,11 +49,22 @@
   <div class="error">{engine.error}</div>
 {:else}
   <Hud {engine} />
-  <div class="bottom">
-    <TimeBar {engine} />
-    <MutationBar {engine} />
+  <div class="bottom" class:beside={engine.sporesOpen}>
+    {#if engine.replay}
+      <ReplayBar {engine} />
+    {:else}
+      <TimeBar {engine} />
+      <MutationBar {engine} />
+    {/if}
   </div>
+  <MySpores {engine} />
   <DebugPanel {engine} />
+  <div class="tools" class:raised={engine.sporesOpen || engine.debugOpen}>
+    <button class:on={engine.sporesOpen} onclick={() => engine.toggleSpores()} aria-expanded={engine.sporesOpen}>
+      mes spores{engine.spores.length ? ` · ${engine.spores.length}` : ''}
+    </button>
+    <button class:on={engine.debugOpen} onclick={() => engine.toggleDebug()} aria-expanded={engine.debugOpen}>réglages</button>
+  </div>
 {/if}
 
 <style>
@@ -73,8 +91,42 @@
     pointer-events: none;
   }
 
+  @media (min-width: 601px) {
+    .bottom.beside {
+      padding-left: 372px;
+    }
+  }
+
   .bottom > :global(*) {
     pointer-events: auto;
+  }
+
+  .tools {
+    position: absolute;
+    z-index: 3;
+    top: calc(76px + env(safe-area-inset-top));
+    right: 16px;
+    display: flex;
+    gap: 6px;
+  }
+
+  .tools button {
+    font-size: 0.75rem;
+    background: var(--panel);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+
+  @media (max-width: 600px) {
+    .tools.raised {
+      top: auto;
+      bottom: calc(var(--sheet, 62vh) + 8px);
+    }
+
+    .bottom.beside {
+      z-index: 3;
+      bottom: calc(var(--sheet, 62vh) + 44px);
+    }
   }
 
   .error {

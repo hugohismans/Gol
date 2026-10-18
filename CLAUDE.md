@@ -39,6 +39,7 @@ Phase 3 : lignées nommées, arbre généalogique, snapshots R2, timelapse.
 - src/sim/organisme.ts porte la logique du monde (calendrier, lignées, recensement, spores, sauvegarde) et délègue le calcul des champs à un Backend.
 - Deux moteurs appliquent les mêmes règles : src/sim/gpu/ (WebGL2, navigateur) et src/sim/cpu/ (TypeScript pur, tests et futur serveur). Toute modification d'une règle se fait dans src/sim/gpu/shaders.ts ET src/sim/cpu/backend.ts, puis se vérifie avec scripts/dev/compare.mjs.
 - Le banc de survie (scripts/survie-cpu.ts) mesure la survie sur la durée hors navigateur.
+- Histoire : chaque lignée garde sa surface et son centre à chaque recensement (Lineage.history), son visiteur et ses descendantes. Le monde produit un instantané compact (src/sim/frame.ts) tous les 600 ticks ; le prototype les garde dans IndexedDB (src/history.ts), la phase 3 les mettra dans R2.
 
 ## Ajouts du prototype à valider
 - Lignée fantôme : une case morte porte la lignée la plus influente de son voisinage ; c'est le génome dont elle hérite si elle naît (implémentation de "la lignée dominante autour").

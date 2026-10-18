@@ -47,7 +47,11 @@ const harness = {
     return out;
   },
   render(layer: Layer = 'final') {
-    renderer.render(gpu.textures, canvas.width, canvas.height, { centerX: canvas.width / 2, centerY: canvas.height / 2, scale: canvas.width, clip: false }, layer, performance.now() / 1000, daylight(sim.tick), sim.stats.meanSediment);
+    renderer.render(gpu.textures, {
+      width: canvas.width, height: canvas.height,
+      view: { centerX: canvas.width / 2, centerY: canvas.height / 2, scale: canvas.width, clip: false },
+      layer, time: performance.now() / 1000, daylight: daylight(sim.tick), meanSediment: sim.stats.meanSediment,
+    });
     gl.finish();
   },
   genomeStats() {

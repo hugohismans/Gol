@@ -2,9 +2,9 @@
 
 import { ALIVE_THRESHOLD, SEDIMENT_EARTH } from '../sim/config';
 import { Program, createFramebuffer, createFullscreenTriangle, createTexture } from '../sim/gpu/gl';
-import type { SimTextures } from '../sim/gpu/backend';
+import type { Frame } from '../sim/frame';
 import { VERTEX_SHADER } from '../sim/gpu/shaders';
-import { COMPOSITE_SHADER, PREP_SHADER } from './shaders';
+import { COMPOSITE_SHADER, MAX_FOCUS, PREP_SHADER } from './shaders';
 
 export type Layer = 'final' | 'vitalite' | 'lignees' | 'nutriments' | 'sediment';
 export const LAYERS: Layer[] = ['final', 'vitalite', 'lignees', 'nutriments', 'sediment'];
@@ -23,6 +23,28 @@ const SEDIMENT_MATURITY = 0.3;
 /** Durée d'affichage de l'anneau d'une spore déposée. */
 const SPORE_MARK_SECONDS = 2;
 
+/** Ce que le rendu lit : les textures de la simulation, ou celles d'un instantané. */
+export interface WorldTextures {
+  state: WebGLTexture;
+  aux: WebGLTexture;
+  sediment: WebGLTexture;
+}
+
+export interface RenderOptions {
+  width: number;
+  height: number;
+  view: View;
+  layer: Layer;
+  /** Temps réel en secondes (pulsation). */
+  time: number;
+  daylight: number;
+  meanSediment: number;
+  /** Lignées mises en évidence ; les autres s'estompent. */
+  focus?: { ids: number[]; strength: number };
+  /** Anneau qui signale un lieu (en cases), par exemple où vivait une lignée. */
+  marker?: { x: number; y: number; strength: number };
+}
+
 export interface View {
   centerX: number;
   centerY: number;
@@ -38,7 +60,9 @@ export class Renderer {
   private life: WebGLTexture;
   private ground: WebGLTexture;
   private field: WebGLTexture;
+  private focusTex: WebGLTexture;
   private fbo: WebGLFramebuffer;
+  private focusData = new Float32Array(MAX_FOCUS);
 
   constructor(private gl: WebGL2RenderingContext, private size: number) {
     this.prep = new Program(gl, VERTEX_SHADER, PREP_SHADER);
@@ -50,7 +74,8 @@ export class Renderer {
     this.life = createTexture(gl, size, size, opts);
     this.ground = createTexture(gl, size, size, opts);
     this.field = createTexture(gl, size, size, opts);
-    this.fbo = createFramebuffer(gl, [this.life, this.ground, this.field]);
+    this.focusTex = createTexture(gl, size, size, opts);
+    this.fbo = createFramebuffer(gl, [this.life, this.ground, this.field, this.focusTex]);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
@@ -78,9 +103,8 @@ export class Renderer {
     if (this.spores.length > 8) this.spores.shift();
   }
 
-  render(
-    t: SimTextures, width: number, height: number, view: View, layer: Layer, time: number, daylight: number, meanSediment: number,
-  ): void {
+  render(t: WorldTextures, o: RenderOptions): void {
+    const { width, height, view, layer, time, daylight, meanSediment } = o;
     const gl = this.gl;
     gl.bindVertexArray(this.vao);
     gl.disable(gl.BLEND);
@@ -90,8 +114,13 @@ export class Renderer {
     this.prep.use().tex('uState', 0, t.state).tex('uAux', 1, t.aux).tex('uSed', 2, t.sediment);
     this.prep.f('uAliveT', ALIVE_THRESHOLD).f('uSedRef', Math.max(meanSediment, 1e-4));
     this.prep.f('uSedMaturity', 1 - Math.exp(-meanSediment / SEDIMENT_MATURITY));
+    const ids = o.focus?.ids.slice(0, MAX_FOCUS) ?? [];
+    this.focusData.fill(-1);
+    this.focusData.set(ids);
+    gl.uniform1fv(this.prep.loc('uFocus'), this.focusData);
+    this.prep.i('uFocusCount', ids.length);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    for (const tex of [this.life, this.ground, this.field]) {
+    for (const tex of [this.life, this.ground, this.field, this.focusTex]) {
       gl.bindTexture(gl.TEXTURE_2D, tex);
       gl.generateMipmap(gl.TEXTURE_2D);
     }
@@ -99,7 +128,10 @@ export class Renderer {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, width, height);
     const c = this.comp.use();
-    c.tex('uLife', 0, this.life).tex('uGround', 1, this.ground).tex('uField', 2, this.field);
+    c.tex('uLife', 0, this.life).tex('uGround', 1, this.ground).tex('uField', 2, this.field).tex('uFocusTex', 3, this.focusTex);
+    c.f('uFocusOn', ids.length ? (o.focus?.strength ?? 0) : 0);
+    const m = o.marker;
+    c.f('uMarker', m ? m.x / this.size : 0, m ? m.y / this.size : 0, m ? m.strength : 0, 0);
     c.f('uResolution', width, height).f('uCenter', view.centerX, view.centerY).f('uScale', view.scale);
     c.i('uClip', view.clip ? 1 : 0).i('uLayer', LAYER_INDEX[layer]);
     c.f('uTime', time).f('uDaylight', daylight).f('uGrid', this.size).f('uEarth', ...SEDIMENT_EARTH);
@@ -113,9 +145,43 @@ export class Renderer {
 
   dispose(): void {
     const gl = this.gl;
-    [this.life, this.ground, this.field].forEach((t) => gl.deleteTexture(t));
+    [this.life, this.ground, this.field, this.focusTex].forEach((t) => gl.deleteTexture(t));
     gl.deleteFramebuffer(this.fbo);
     this.prep.dispose();
     this.comp.dispose();
+  }
+}
+
+/** Textures d'un instantané passé, pour le revoir avec le même rendu. */
+export class FrameTextures implements WorldTextures {
+  state: WebGLTexture;
+  aux: WebGLTexture;
+  sediment: WebGLTexture;
+  tick = -1;
+  meanSediment = 0;
+
+  constructor(private gl: WebGL2RenderingContext, private size: number) {
+    const opts = { internalFormat: gl.RGBA32F, format: gl.RGBA, type: gl.FLOAT, filter: gl.NEAREST, wrap: gl.CLAMP_TO_EDGE };
+    this.state = createTexture(gl, size, size, opts);
+    this.aux = createTexture(gl, size, size, opts);
+    this.sediment = createTexture(gl, size, size, opts);
+  }
+
+  load(f: Frame): void {
+    if (f.size !== this.size) throw new Error('Instantané de taille différente');
+    const gl = this.gl;
+    const put = (t: WebGLTexture, d: Float32Array) => {
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.size, this.size, gl.RGBA, gl.FLOAT, d);
+    };
+    put(this.state, f.state);
+    put(this.aux, f.aux);
+    put(this.sediment, f.sed);
+    this.tick = f.tick;
+    this.meanSediment = f.meanSediment;
+  }
+
+  dispose(): void {
+    [this.state, this.aux, this.sediment].forEach((t) => this.gl.deleteTexture(t));
   }
 }

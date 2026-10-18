@@ -3,12 +3,12 @@
 const WORLD_KEY = 'organisme.monde.v1';
 const PREFS_KEY = 'organisme.prefs.v1';
 
-async function compress(bytes: Uint8Array): Promise<Uint8Array> {
+export async function compress(bytes: Uint8Array): Promise<Uint8Array> {
   const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new CompressionStream('deflate-raw'));
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
-async function decompress(bytes: Uint8Array): Promise<Uint8Array> {
+export async function decompress(bytes: Uint8Array): Promise<Uint8Array> {
   const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }

@@ -3,8 +3,12 @@
 
 import { COMMON_GLSL } from '../sim/gpu/shaders';
 
+/** Nombre maximal de lignées mises en évidence ensemble (une lignée et ses descendantes). */
+export const MAX_FOCUS = 32;
+
 /** Prépare trois textures filtrables à partir des textures de simulation. */
 export const PREP_SHADER = /* glsl */ `#version 300 es
+#define MAX_FOCUS ${MAX_FOCUS}
 precision highp float;
 precision highp sampler2D;
 uniform sampler2D uState;
@@ -13,9 +17,12 @@ uniform sampler2D uSed;
 uniform float uAliveT;
 uniform float uSedRef;
 uniform float uSedMaturity;
+uniform float uFocus[MAX_FOCUS];
+uniform int uFocusCount;
 layout(location = 0) out vec4 oLife;
 layout(location = 1) out vec4 oGround;
 layout(location = 2) out vec4 oField;
+layout(location = 3) out vec4 oFocus;
 ${COMMON_GLSL}
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
@@ -26,6 +33,12 @@ void main() {
   oLife = vec4(hueColor(a.x) * v, v);
   oGround = vec4(sed.rgb, smoothstep(0.15, 1.9, sed.a / uSedRef) * uSedMaturity);
   oField = vec4(s.y, a.z, s.x >= uAliveT ? 0.0 : a.y, fract(a.x));
+  float f = 0.0;
+  for (int i = 0; i < MAX_FOCUS; i++) {
+    if (i >= uFocusCount) break;
+    if (abs(s.z - uFocus[i]) < 0.5) f = v;
+  }
+  oFocus = vec4(f, 0.0, 0.0, 1.0);
 }
 `;
 
@@ -35,6 +48,9 @@ precision highp sampler2D;
 uniform sampler2D uLife;
 uniform sampler2D uGround;
 uniform sampler2D uField;
+uniform sampler2D uFocusTex;
+uniform float uFocusOn;
+uniform vec4 uMarker;
 uniform vec2 uResolution;
 uniform vec2 uCenter;
 uniform float uScale;
@@ -129,6 +145,25 @@ void main() {
     body *= 0.8 + 0.2 * light;
     float cover = smoothstep(0.015, 0.35, v);
     col = mix(soil, body, cover * 0.95);
+
+    // Mise en évidence d'une lignée : les autres s'estompent, un liseré respire autour d'elle.
+    if (uFocusOn > 0.0) {
+      float inside = smoothstep(0.015, 0.25, smoothTex(uFocusTex, uv).r);
+      float near = textureLod(uFocusTex, uv, 2.5).r;
+      float others = cover * (1.0 - inside);
+      col = mix(col, soil * 0.85, others * 0.7 * uFocusOn);
+      float glow = smoothstep(0.0, 0.2, near) * (1.0 - inside);
+      col += vec3(0.95, 0.88, 0.72) * glow * (0.07 + 0.04 * sin(uTime * 1.7)) * uFocusOn;
+    }
+
+    // Anneau qui signale un lieu (où vit ou vivait une lignée).
+    if (uMarker.z > 0.0) {
+      vec2 md = uv - uMarker.xy;
+      md -= floor(md + 0.5);
+      float dist = length(md) * uGrid;
+      float r = 9.0 + 1.5 * sin(uTime * 1.6);
+      col += vec3(0.95, 0.88, 0.72) * exp(-pow((dist - r) / 1.3, 2.0)) * 0.3 * uMarker.z;
+    }
 
     // Anneau discret autour des spores tout juste déposées.
     for (int i = 0; i < 8; i++) {

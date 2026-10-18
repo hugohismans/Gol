@@ -25,11 +25,6 @@
   let showOthers = $state(false);
   let confirmReset = $state(false);
 
-  function toggle() {
-    engine.debugOpen = !engine.debugOpen;
-    engine.persistPrefs();
-  }
-
   function fmt(v: number, step: number): string {
     if (step < 1e-6) return v.toExponential(1);
     const digits = Math.max(0, Math.min(5, Math.ceil(-Math.log10(step))));
@@ -56,8 +51,6 @@
     engine.reset();
   }
 </script>
-
-<button class="toggle" class:on={engine.debugOpen} onclick={toggle} aria-expanded={engine.debugOpen}>réglages</button>
 
 {#snippet slider(key: keyof Params)}
   {@const r = PARAM_RANGES[key]}
@@ -128,17 +121,6 @@
 {/if}
 
 <style>
-  .toggle {
-    position: absolute;
-    top: calc(76px + env(safe-area-inset-top));
-    right: 16px;
-    font-size: 0.75rem;
-    background: var(--panel);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    z-index: 3;
-  }
-
   .panel {
     position: absolute;
     z-index: 2;
@@ -167,10 +149,6 @@
       border-radius: 16px 16px 0 0;
     }
 
-    .toggle.on {
-      top: auto;
-      bottom: calc(62vh + 8px);
-    }
   }
 
   section + section {
