@@ -1,7 +1,7 @@
 // Moteur GPU : ping-pong de textures RGBA32F en WebGL2.
 // Reçoit un contexte déjà créé, ne touche jamais au DOM.
 
-import { AUX, GENOME, SED, STATE } from '../backend';
+import { AUX, GENOME, SED, STATE, fertilityPeriod } from '../backend';
 import type { Backend, StampArgs, StepConstants } from '../backend';
 import { buildKernelTaps } from '../kernel';
 import { Program, createFramebuffer, createFullscreenTriangle, createTexture, requireFloatTargets } from './gl';
@@ -67,7 +67,8 @@ export class GpuBackend implements Backend {
     p.f('uDt', c.dt).f('uAliveT', c.aliveT).f('uLodGap', c.lodGap);
     p.f('uRadiusScale', c.radiusScale).f('uMuOffset', c.muOffset).f('uSigmaScale', c.sigmaScale);
     p.f('uAppetiteScale', c.appetiteScale).f('uAppetiteGrowth', c.appetiteGrowth);
-    p.f('uDiffusion', c.diffusion).f('uConsumption', c.consumption).f('uNutHalf', c.nutHalf).f('uUptakeHalf', c.uptakeHalf);
+    p.f('uDiffusion', c.diffusion).f('uConsumption', c.consumption).f('uNutHalf', c.nutHalf).f('uUptakeHalf', c.uptakeHalf).f('uNutrientWidth', c.nutrientWidth).f('uFertility', c.fertility);
+    p.i('uFertilityPeriod', fertilityPeriod(this.size));
     p.f('uStarvation', c.starvation).f('uStarveBelow', c.starveBelow).f('uSenescence', c.senescence);
     p.f('uSenescenceAge', ...c.senescenceAge);
     p.f('uGhostDecay', c.ghostDecay).f('uGhostMin', c.ghostMin);
@@ -77,12 +78,12 @@ export class GpuBackend implements Backend {
     p.f('uSedRate', c.sedRate).f('uSedDarken', c.sedDarken).f('uSedMemory', c.sedMemory).f('uEarth', ...c.earth);
   }
 
-  tick(regen: number, seed: number): void {
+  tick(regen: number, seed: number, terrainTime: number): void {
     const gl = this.gl;
     const src = this.bufs[this.cur];
     const dst = this.bufs[1 - this.cur];
     const p = this.stepProg.use();
-    p.f('uRegen', regen).u('uSeed', seed);
+    p.f('uRegen', regen).u('uSeed', seed).f('uTerrainTime', terrainTime);
     p.tex('uState', 0, src.tex[STATE]).tex('uGenome', 1, src.tex[GENOME]).tex('uAux', 2, src.tex[AUX]);
     p.tex('uSed', 3, src.tex[SED]).tex('uVit', 4, this.vitTex);
     this.draw(dst.fbo);

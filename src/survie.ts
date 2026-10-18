@@ -64,9 +64,9 @@ const harness = {
     return [...sim.lineages.values()].map((l) => ({ id: l.id, parent: l.parentId, area: l.area, peak: l.peakArea, extinct: l.extinctTick }));
   },
   /** Compare les moteurs GPU et CPU sur les mêmes conditions initiales. */
-  compare(ticks: number, size = 64) {
-    const a = new Organisme(new GpuBackend(gl, size), { seed: 7 });
-    const b = new Organisme(new CpuBackend(size), { seed: 7 });
+  compare(ticks: number, size = 64, params: Partial<Params> = {}) {
+    const a = new Organisme(new GpuBackend(gl, size), { seed: 7, params });
+    const b = new Organisme(new CpuBackend(size), { seed: 7, params });
     a.seedRandom(3);
     b.seedRandom(3);
     const out = [];
@@ -91,6 +91,18 @@ const harness = {
     }
     a.dispose();
     return out;
+  },
+  /** Charge une sauvegarde (par exemple produite par le banc CPU) pour la rendre. */
+  async load(url: string) {
+    const bytes = new Uint8Array(await (await fetch(url)).arrayBuffer());
+    const size = new DataView(bytes.buffer).getUint32(0, true) && JSON.parse(new TextDecoder().decode(bytes.subarray(4, 4 + new DataView(bytes.buffer).getUint32(0, true)))).size;
+    sim?.dispose();
+    renderer?.dispose();
+    gpu = new GpuBackend(gl, size);
+    sim = new Organisme(gpu);
+    renderer = new Renderer(gl, size);
+    sim.restore(bytes);
+    return sim.census();
   },
   roundTrip() {
     const bytes = sim.serialize();

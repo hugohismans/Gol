@@ -183,6 +183,7 @@ export class Engine {
     const p = Renderer.screenToWorld(sx, sy, this.canvas.height, v, this.sim.size);
     if (v.clip && !p.inside) return;
     this.sim.spawnSpore(p.x, p.y, this.mutation);
+    this.renderer.markSpore(p.x, p.y, (performance.now() - this.startTime) / 1000);
     this.sim.census();
     this.refreshUi();
   }

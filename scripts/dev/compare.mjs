@@ -8,5 +8,5 @@ const page = await browser.newPage();
 page.on('pageerror', (e) => console.log('[erreur]', e.message));
 await page.goto('http://localhost:5173/survie.html');
 await page.waitForFunction(() => window.ready === true);
-console.log(JSON.stringify(await page.evaluate((t) => window.harness.compare(t), Number(process.argv[2] ?? 30)), null, 1));
+console.log(JSON.stringify(await page.evaluate(([t, p]) => window.harness.compare(t, 64, p), [Number(process.argv[2] ?? 30), JSON.parse(process.argv[3] ?? '{}')]), null, 1));
 await browser.close();

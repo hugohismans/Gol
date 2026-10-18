@@ -3,7 +3,7 @@
 // tests, réglage hors navigateur, et plus tard le serveur.
 // Toute modification des règles doit être faite dans les deux moteurs.
 
-import { AUX, GENOME, SED, STATE } from '../backend';
+import { AUX, GENOME, SED, STATE, fertilityPeriod } from '../backend';
 import type { Backend, StampArgs, StepConstants } from '../backend';
 import { HUE_CHROMA, HUE_LIGHTNESS } from '../config';
 import { buildKernelTaps } from '../kernel';
@@ -52,6 +52,34 @@ export function hueColor(h: number, out: number[]): void {
   out[2] = clamp(-0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s, 0, 1) ** (1 / 2.2);
 }
 
+function lattice(x: number, y: number, z: number, period: number): number {
+  const px = ((x % period) + period) % period;
+  const py = ((y % period) + period) % period;
+  const h = hash((px + py * 4096 + z * 16777216) >>> 0);
+  return (h >>> 8) * (2 / 16777216) - 1;
+}
+
+function vnoise(x: number, y: number, z: number, period: number): number {
+  const ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z);
+  const fx = x - ix, fy = y - iy, fz = z - iz;
+  const q = (f: number) => f * f * f * (f * (f * 6 - 15) + 10);
+  const ux = q(fx), uy = q(fy), uz = q(fz);
+  const mix = (a: number, b: number, t: number) => a + (b - a) * t;
+  const a = mix(lattice(ix, iy, iz, period), lattice(ix + 1, iy, iz, period), ux);
+  const b = mix(lattice(ix, iy + 1, iz, period), lattice(ix + 1, iy + 1, iz, period), ux);
+  const d = mix(lattice(ix, iy, iz + 1, period), lattice(ix + 1, iy, iz + 1, period), ux);
+  const e = mix(lattice(ix, iy + 1, iz + 1, period), lattice(ix + 1, iy + 1, iz + 1, period), ux);
+  return mix(mix(a, b, uy), mix(d, e, uy), uz);
+}
+
+/** Multiplicateur de régénération, identique à fertility() en GLSL. */
+export function fertility(qx: number, qy: number, period: number, t: number, contrast: number): number {
+  const n =
+    0.65 * vnoise(qx * period, qy * period, t, period) +
+    0.35 * vnoise(qx * 2 * period, qy * 2 * period, t * 1.7 + 13, 2 * period);
+  return Math.max(0, 1 + contrast * clamp(n * 1.5, -1, 1));
+}
+
 const N8 = [
   [1, 0], [-1, 0], [0, 1], [0, -1],
   [1, 1], [-1, 1], [1, -1], [-1, -1],
@@ -79,8 +107,9 @@ export class CpuBackend implements Backend {
     this.c = c;
   }
 
-  tick(regen: number, seed: number): void {
+  tick(regen: number, seed: number, terrainTime: number): void {
     this.buildMips();
+    const period = fertilityPeriod(this.size);
     const c = this.c;
     const n = this.size;
     const st = this.cur[STATE], ge = this.cur[GENOME], au = this.cur[AUX], se = this.cur[SED];
@@ -149,12 +178,12 @@ export class CpuBackend implements Backend {
           }
         }
 
+        const food = (nut / (nut + c.nutHalf)) * (1 + c.nutHalf);
         const mu = g1 + c.muOffset;
-        const sig = Math.max(1e-4, g2 * c.sigmaScale);
+        const sig = Math.max(1e-4, g2 * c.sigmaScale * (1 - c.nutrientWidth + c.nutrientWidth * food));
         const app = Math.max(0, g3 * c.appetiteScale);
         const d = (U - mu) / sig;
         let G = 2 * Math.exp(-0.5 * d * d) - 1;
-        const food = (nut / (nut + c.nutHalf)) * (1 + c.nutHalf);
         if (G > 0) G *= food * Math.max(0, 1 + c.appetiteGrowth * (app - 0.5));
         G -= c.starvation * Math.max(0, 1 - nut / Math.max(c.starveBelow, 1e-4));
         G -= c.senescence * smoothstep(c.senescenceAge[0], c.senescenceAge[1], age);
@@ -167,7 +196,8 @@ export class CpuBackend implements Backend {
         const ym = ((((py - 1 + n) % n) * n + px) * 4) + 1;
         const lap = st[xp] + st[xm] + st[yp] + st[ym] - 4 * nut;
         const consume = Math.min(nut, (nv * app * c.consumption * nut) / (nut + c.uptakeHalf + 1e-6));
-        const nn = clamp(nut + c.diffusion * lap + regen * (1 - nut) - consume, 0, 1);
+        const fert = c.fertility > 0 ? fertility((px + 0.5) / n, (py + 0.5) / n, period, terrainTime, c.fertility) : 1;
+        const nn = clamp(nut + c.diffusion * lap + regen * fert * (1 - nut) - consume, 0, 1);
 
         const nowAlive = nv >= c.aliveT && lin > 0.5;
         const nage = nowAlive ? (alive ? age + 1 : 0) : 0;

@@ -49,6 +49,30 @@ vec3 oklch(float L, float C, float h) {
   return pow(clamp(lin, 0.0, 1.0), vec3(1.0 / 2.2));
 }
 vec3 hueColor(float h) { return oklch(HUE_L, HUE_C, h); }
+// Bruit de valeur torique (période entière) et dérivant dans le temps.
+float lattice(ivec3 c, int period) {
+  uint x = uint((c.x % period + period) % period);
+  uint y = uint((c.y % period + period) % period);
+  uint h = hash(x + y * 4096u + uint(c.z) * 16777216u);
+  return float(h >> 8) * (2.0 / 16777216.0) - 1.0;
+}
+float vnoise(vec3 p, int period) {
+  vec3 i = floor(p);
+  vec3 f = p - i;
+  vec3 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  ivec3 c = ivec3(i);
+  float a = mix(lattice(c, period), lattice(c + ivec3(1, 0, 0), period), u.x);
+  float b = mix(lattice(c + ivec3(0, 1, 0), period), lattice(c + ivec3(1, 1, 0), period), u.x);
+  float d = mix(lattice(c + ivec3(0, 0, 1), period), lattice(c + ivec3(1, 0, 1), period), u.x);
+  float e = mix(lattice(c + ivec3(0, 1, 1), period), lattice(c + ivec3(1, 1, 1), period), u.x);
+  return mix(mix(a, b, u.y), mix(d, e, u.y), u.z);
+}
+// Multiplicateur de régénération en une case (q dans [0, 1)).
+float fertility(vec2 q, int period, float t, float contrast) {
+  float n = 0.65 * vnoise(vec3(q * float(period), t), period)
+          + 0.35 * vnoise(vec3(q * float(2 * period), t * 1.7 + 13.0), 2 * period);
+  return max(0.0, 1.0 + contrast * clamp(n * 1.5, -1.0, 1.0));
+}
 `;
 
 export function stepShader(tapCount: number): string {
@@ -81,6 +105,10 @@ uniform float uDiffusion;
 uniform float uConsumption;
 uniform float uNutHalf;
 uniform float uUptakeHalf;
+uniform float uNutrientWidth;
+uniform float uFertility;
+uniform int uFertilityPeriod;
+uniform float uTerrainTime;
 uniform float uStarvation;
 uniform float uStarveBelow;
 uniform float uSenescence;
@@ -166,12 +194,12 @@ void main() {
   }
 
   // Croissance en cloche, modulée par les nutriments et l'appétit.
+  float food = nut / (nut + uNutHalf) * (1.0 + uNutHalf);
   float mu = g.y + uMuOffset;
-  float sig = max(1e-4, g.z * uSigmaScale);
+  float sig = max(1e-4, g.z * uSigmaScale * (1.0 - uNutrientWidth + uNutrientWidth * food));
   float app = max(0.0, g.w * uAppetiteScale);
   float d = (U - mu) / sig;
   float G = 2.0 * exp(-0.5 * d * d) - 1.0;
-  float food = nut / (nut + uNutHalf) * (1.0 + uNutHalf);
   if (G > 0.0) G *= food * max(0.0, 1.0 + uAppetiteGrowth * (app - 0.5));
   G -= uStarvation * max(0.0, 1.0 - nut / max(uStarveBelow, 1e-4));
   G -= uSenescence * smoothstep(uSenescenceAge.x, uSenescenceAge.y, age);
@@ -185,7 +213,8 @@ void main() {
             + texelFetch(uState, wrap(p + ivec2(0, -1)), 0).y
             - 4.0 * nut;
   float consume = min(nut, nv * app * uConsumption * nut / (nut + uUptakeHalf + 1e-6));
-  float nn = clamp(nut + uDiffusion * lap + uRegen * (1.0 - nut) - consume, 0.0, 1.0);
+  float fert = uFertility > 0.0 ? fertility((vec2(p) + 0.5) / float(uSize), uFertilityPeriod, uTerrainTime, uFertility) : 1.0;
+  float nn = clamp(nut + uDiffusion * lap + uRegen * fert * (1.0 - nut) - consume, 0.0, 1.0);
 
   // Naissance : héritage du génome fantôme avec mutation gaussienne légère.
   bool nowAlive = nv >= uAliveT && lin > 0.5;

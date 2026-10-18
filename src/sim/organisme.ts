@@ -8,6 +8,7 @@ import {
   CENSUS_INTERVAL_TICKS,
   DEFAULT_GENOME,
   DEFAULT_PARAMS,
+  FERTILITY_DRIFT_DAYS,
   SAVE_VERSION,
   SECONDS_PER_TICK,
   SEDIMENT_EARTH,
@@ -71,7 +72,11 @@ export class Organisme {
     this.backend.configure(stepConstants(this.params));
     for (let i = 0; i < n; i++) {
       const q = this.params;
-      this.backend.tick(q.regenRate * regenFactor(this.tick, q.dayAmplitude, q.seasonAmplitude), this.seed());
+      this.backend.tick(
+        q.regenRate * regenFactor(this.tick, q.dayAmplitude, q.seasonAmplitude),
+        this.seed(),
+        this.tick / (FERTILITY_DRIFT_DAYS * TICKS_PER_DAY),
+      );
       this.tick++;
       if (this.tick - this.lastCensusTick >= CENSUS_INTERVAL_TICKS) this.census();
     }
@@ -151,7 +156,7 @@ export class Organisme {
     const sed = new Float32Array(n * 4);
     const g = DEFAULT_GENOME;
     for (let i = 0; i < n; i++) {
-      state[i * 4 + 1] = 1;
+      state[i * 4 + 1] = this.params.initialNutrients;
       genome.set([g.radius, g.mu, g.sigma, g.appetite], i * 4);
       sed.set(SEDIMENT_EARTH, i * 4);
     }

@@ -43,6 +43,8 @@ uniform float uTime;
 uniform float uDaylight;
 uniform float uGrid;
 uniform vec3 uEarth;
+// Spores récentes : position (uv), âge en secondes, intensité.
+uniform vec4 uSpores[8];
 out vec4 outColor;
 
 // B-spline bicubique à partir de 4 lectures bilinéaires.
@@ -98,17 +100,17 @@ void main() {
     col = mix(vec3(0.0), ground.rgb * 1.6, clamp(ground.a, 0.0, 1.0));
   } else {
     // Fond terreux : sédiment accumulé sur une terre sombre.
-    vec3 soil = mix(uEarth * 0.6, ground.rgb * 0.6, clamp(ground.a, 0.0, 1.0) * 0.85);
+    vec3 soil = mix(uEarth * 0.75, ground.rgb * 0.42, clamp(ground.a, 0.0, 1.0) * 0.9);
 
     // Lueur des nutriments sous la surface, floue et respirant avec le jour.
     float nutBlur = textureLod(uField, uv, 2.5).x;
     float light = 0.75 + 0.25 * uDaylight;
-    soil += vec3(0.06, 0.16, 0.15) * pow(clamp(nutBlur, 0.0, 1.0), 2.2) * 0.35 * light;
+    soil += vec3(0.085, 0.10, 0.085) * pow(clamp(nutBlur, 0.0, 1.0), 2.0) * 0.6 * light;
 
     // Halo diffus autour du vivant.
     vec4 haloT = textureLod(uLife, uv, 3.0);
     vec3 haloC = haloT.rgb / max(haloT.a, 1e-3);
-    soil += haloC * smoothstep(0.0, 0.5, haloT.a) * 0.10;
+    soil += haloC * smoothstep(0.0, 0.5, haloT.a) * 0.07;
 
     // Corps : bords doux, lumière rasante sur le gradient, légère pulsation.
     vec2 e = vec2(1.0 / uGrid, 0.0);
@@ -120,12 +122,24 @@ void main() {
     float phase = field.w * 6.2831853;
     float pulse = 1.0 + 0.06 * sin(uTime * 0.9 + phase + v * 3.0);
     float grow = clamp(field.y * 40.0, -1.0, 1.0);
-    vec3 body = hc * (0.18 + 0.85 * pow(v, 0.8)) * pulse;
-    body += hc * rim * 0.25 + vec3(0.9, 0.85, 0.75) * max(grow, 0.0) * 0.06 * v;
+    vec3 body = hc * (0.16 + 0.68 * pow(v, 0.8)) * pulse;
+    body += hc * rim * 0.3 + vec3(0.9, 0.85, 0.75) * max(grow, 0.0) * 0.06 * v;
     body *= 0.85 + 0.3 * shade;
     body *= 0.8 + 0.2 * light;
     float cover = smoothstep(0.015, 0.35, v);
     col = mix(soil, body, cover * 0.95);
+
+    // Anneau discret autour des spores tout juste déposées.
+    for (int i = 0; i < 8; i++) {
+      vec4 sp = uSpores[i];
+      if (sp.w <= 0.0) continue;
+      vec2 dd = uv - sp.xy;
+      dd -= floor(dd + 0.5);
+      float dist = length(dd) * uGrid;
+      float radius = 3.0 + sp.z * 9.0;
+      float ring = exp(-pow((dist - radius) / 1.6, 2.0)) * (1.0 - smoothstep(0.0, 2.0, sp.z));
+      col += vec3(0.85, 0.8, 0.68) * ring * 0.22 * sp.w;
+    }
 
     // Vignette et grain très léger.
     vec2 q = frag / uResolution - 0.5;

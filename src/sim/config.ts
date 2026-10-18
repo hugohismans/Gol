@@ -135,6 +135,14 @@ export const GHOST_DECAY = 0.85;
 /** Influence minimale pour qu'une case morte porte encore une lignée fantôme. */
 export const GHOST_MIN_INFLUENCE = 0.03;
 
+// --- Fertilité du sol ---------------------------------------------------
+
+/** Taille (en cases) des grandes zones fertiles ou arides. */
+export const FERTILITY_SCALE = 64;
+
+/** Jours simulés pour que la carte de fertilité se renouvelle (dérive du climat). */
+export const FERTILITY_DRIFT_DAYS = 24;
+
 // --- Couleur ---------------------------------------------------------------
 
 /** Luminosité OKLCH des teintes de lignée. */
@@ -166,12 +174,18 @@ export interface Params {
   appetiteGrowth: number;
   /** Régénération locale des nutriments par tick, vers 1. */
   regenRate: number;
+  /** Niveau de nutriments d'un monde neuf (appliqué au reset). */
+  initialNutrients: number;
+  /** Contraste de fertilité du sol : 0 = régénération uniforme, 1 = zones arides sans régénération. */
+  fertilityContrast: number;
   /** Coefficient de diffusion des nutriments par tick (stable sous 0.25). */
   diffusion: number;
   /** Consommation par tick à vitalité 1 et appétit 1. */
   consumption: number;
   /** Demi saturation : nutriments pour lesquels la croissance est à moitié. */
   nutrientHalf: number;
+  /** Part de la largeur de croissance qui dépend des nutriments (0 : aucune). */
+  nutrientWidth: number;
   /** Demi saturation de la consommation : on ne mange pas ce qui n'est plus là. */
   uptakeHalf: number;
   /** Déclin (unités Lenia) quand les nutriments sont épuisés. */
@@ -205,10 +219,13 @@ export const DEFAULT_PARAMS: Params = {
   appetiteScale: 1,
   appetiteGrowth: 0.8,
   regenRate: 0.0012,
+  initialNutrients: 1,
+  fertilityContrast: 0,
   diffusion: 0.04,
   consumption: 0.012,
   nutrientHalf: 0.15,
   uptakeHalf: 0.2,
+  nutrientWidth: 0,
   starvation: 0.25,
   starveBelow: 0.12,
   senescence: 0.15,
@@ -230,9 +247,12 @@ export const PARAM_RANGES: Record<keyof Params, { min: number; max: number; step
   appetiteScale: { min: 0.2, max: 2.5, step: 0.01, label: 'Appétit (x)' },
   appetiteGrowth: { min: 0, max: 2, step: 0.01, label: 'Bonus de croissance par appétit' },
   regenRate: { min: 0, max: 0.006, step: 0.00005, label: 'Régénération des nutriments' },
+  fertilityContrast: { min: 0, max: 1, step: 0.01, label: 'Contraste de fertilité du sol' },
+  initialNutrients: { min: 0, max: 1, step: 0.01, label: 'Nutriments initiaux (au reset)' },
   diffusion: { min: 0, max: 0.24, step: 0.005, label: 'Diffusion des nutriments' },
   consumption: { min: 0, max: 0.05, step: 0.0005, label: 'Consommation' },
   nutrientHalf: { min: 0.01, max: 1, step: 0.01, label: 'Demi saturation nutriments' },
+  nutrientWidth: { min: 0, max: 1, step: 0.01, label: 'Largeur liée aux nutriments' },
   uptakeHalf: { min: 0, max: 1, step: 0.01, label: 'Demi saturation consommation' },
   starvation: { min: 0, max: 1.5, step: 0.01, label: 'Famine' },
   starveBelow: { min: 0, max: 0.5, step: 0.01, label: 'Seuil de famine' },

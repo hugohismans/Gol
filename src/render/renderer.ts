@@ -16,6 +16,9 @@ export type ViewMode = 'mosaique' | 'couvrir' | 'contenir';
 /** Épaisseur de sédiment qui donne une couverture d'environ 63 %. */
 const SEDIMENT_VISUAL_SCALE = 1.5;
 
+/** Durée d'affichage de l'anneau d'une spore déposée. */
+const SPORE_MARK_SECONDS = 2;
+
 export interface View {
   centerX: number;
   centerY: number;
@@ -62,6 +65,15 @@ export class Renderer {
     return { x: wrap(u) * size, y: wrap(w) * size, inside };
   }
 
+  /** Spores récentes à signaler : position en cases et âge en secondes. */
+  private spores: { x: number; y: number; t: number }[] = [];
+  private sporeData = new Float32Array(8 * 4);
+
+  markSpore(x: number, y: number, time: number): void {
+    this.spores.push({ x, y, t: time });
+    if (this.spores.length > 8) this.spores.shift();
+  }
+
   render(t: SimTextures, width: number, height: number, view: View, layer: Layer, time: number, daylight: number): void {
     const gl = this.gl;
     gl.bindVertexArray(this.vao);
@@ -84,6 +96,10 @@ export class Renderer {
     c.f('uResolution', width, height).f('uCenter', view.centerX, view.centerY).f('uScale', view.scale);
     c.i('uClip', view.clip ? 1 : 0).i('uLayer', LAYER_INDEX[layer]);
     c.f('uTime', time).f('uDaylight', daylight).f('uGrid', this.size).f('uEarth', ...SEDIMENT_EARTH);
+    this.spores = this.spores.filter((s) => time - s.t < SPORE_MARK_SECONDS);
+    this.sporeData.fill(0);
+    this.spores.forEach((s, i) => this.sporeData.set([s.x / this.size, s.y / this.size, time - s.t, 1], i * 4));
+    gl.uniform4fv(c.loc('uSpores'), this.sporeData);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindVertexArray(null);
   }

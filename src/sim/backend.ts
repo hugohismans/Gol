@@ -17,6 +17,7 @@ import {
   SPORE_DENSITY,
   SPORE_NUTRIENT_BOOST,
   TICKS_PER_DAY,
+  FERTILITY_SCALE,
 } from './config';
 import type { Params } from './config';
 
@@ -40,6 +41,8 @@ export interface StepConstants {
   consumption: number;
   nutHalf: number;
   uptakeHalf: number;
+  nutrientWidth: number;
+  fertility: number;
   starvation: number;
   starveBelow: number;
   senescence: number;
@@ -74,6 +77,8 @@ export function stepConstants(q: Params): StepConstants {
     consumption: q.consumption,
     nutHalf: q.nutrientHalf,
     uptakeHalf: q.uptakeHalf,
+    nutrientWidth: q.nutrientWidth,
+    fertility: q.fertilityContrast,
     starvation: q.starvation,
     starveBelow: q.starveBelow,
     senescence: q.senescence,
@@ -95,6 +100,11 @@ export function stepConstants(q: Params): StepConstants {
     sedMemory: SEDIMENT_COLOR_MEMORY,
     earth: SEDIMENT_EARTH,
   };
+}
+
+/** Nombre de cellules de bruit de fertilité sur un côté du tore (entier, pour raccorder). */
+export function fertilityPeriod(size: number): number {
+  return Math.max(1, Math.round(size / FERTILITY_SCALE));
 }
 
 /** Tampon : spore (mode 0) ou conversion en sous-lignée (mode 1) dans un disque. */
@@ -123,8 +133,11 @@ export interface Backend {
   readonly size: number;
   /** Fixe les constantes des prochains ticks. */
   configure(c: StepConstants): void;
-  /** Joue un tick avec la régénération du moment et une graine aléatoire. */
-  tick(regen: number, seed: number): void;
+  /**
+   * Joue un tick avec la régénération du moment, une graine aléatoire et le
+   * temps de dérive de la carte de fertilité.
+   */
+  tick(regen: number, seed: number, terrainTime: number): void;
   stamp(s: StampArgs): void;
   /** Grille RGBA d'index STATE, GENOME, AUX ou SED. Ne pas conserver : peut être réutilisée. */
   read(index: number): Float32Array;
