@@ -107,7 +107,7 @@ export class Organisme {
     }
   }
 
-  /** Instantané complet lu depuis le GPU. */
+  /** Instantané complet lu depuis le moteur de calcul. */
   getState(): SimState {
     const st = this.backend.read(STATE);
     const ge = this.backend.read(GENOME);
@@ -148,7 +148,7 @@ export class Organisme {
     return s;
   }
 
-  /** Remet le monde à zéro : nutriments pleins, aucune vie, aucun sédiment. */
+  /** Remet le monde à zéro : nutriments initiaux, aucune vie, aucun sédiment. */
   reset(): void {
     const n = this.size * this.size;
     const state = new Float32Array(n * 4);

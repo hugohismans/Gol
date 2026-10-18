@@ -1,8 +1,9 @@
 // Banc de survie sur CPU (Node), sans navigateur ni GPU.
 // Usage : npx tsx scripts/survie-cpu.ts [jours=30] [taille=128] [graine=1] ['{"param": valeur}']
-// Variables : SPORES (10), PAS (ticks par ligne, 2400), SAUVE (fichier .bin écrit à la fin).
+// Variables : SPORES (10), PAS (ticks par ligne, 2400), SAUVE (fichier .bin écrit à la fin),
+// REPRISE (fichier .bin dont repartir), JOURNAL (préfixe : une sauvegarde par jour entier).
 
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { CpuBackend } from '../src/sim/cpu/backend';
 import { Organisme } from '../src/sim/organisme';
 import { TICKS_PER_DAY } from '../src/sim/config';
@@ -16,7 +17,11 @@ const spores = Number(process.env.SPORES ?? 10);
 const chunk = Number(process.env.PAS ?? TICKS_PER_DAY);
 
 const sim = new Organisme(new CpuBackend(size), { seed, params });
-sim.seedRandom(spores);
+if (process.env.REPRISE) {
+  sim.restore(readFileSync(process.env.REPRISE));
+  Object.assign(sim.params, params);
+}
+else sim.seedRandom(spores);
 const t0 = Date.now();
 const steps = Math.round((days * TICKS_PER_DAY) / chunk);
 let minLiving = Infinity;
@@ -49,6 +54,7 @@ for (let k = 1; k <= steps; k++) {
       ` R ${(r / n).toFixed(2)} mu ${(mu / n).toFixed(4)} sig ${(sg / n).toFixed(4)} app ${(ap / n).toFixed(3)}` +
       `  ${((Date.now() - t) / chunk).toFixed(1)} ms/tick`,
   );
+  if (process.env.JOURNAL && sim.tick % TICKS_PER_DAY === 0) writeFileSync(`${process.env.JOURNAL}.j${sim.tick / TICKS_PER_DAY}.bin`, sim.serialize());
   if (s.livingCells === 0) {
     console.log('EXTINCTION');
     break;
