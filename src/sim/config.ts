@@ -270,6 +270,17 @@ export const PARAM_RANGES: Record<keyof Params, { min: number; max: number; step
   sedimentDarkening: { min: 0, max: 2e-5, step: 1e-7, label: 'Assombrissement du sédiment' },
 };
 
+// --- Histoire -------------------------------------------------------------
+
+/** Points d'histoire conservés par lignée ; au delà, les plus anciens sont éclaircis. */
+export const HISTORY_MAX_POINTS = 480;
+
+/** Intervalle en ticks entre deux instantanés du monde (pour revenir en arrière). */
+export const SNAPSHOT_INTERVAL_TICKS = 600;
+
+/** Jours récents où tous les instantanés sont gardés ; plus ancien : un par jour. */
+export const SNAPSHOT_RECENT_DAYS = 7;
+
 // --- Persistance ---------------------------------------------------------
 
 /** Version du format de sauvegarde. */

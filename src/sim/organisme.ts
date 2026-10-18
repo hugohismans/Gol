@@ -6,6 +6,8 @@
 import {
   ALIVE_THRESHOLD,
   CENSUS_INTERVAL_TICKS,
+  HISTORY_MAX_POINTS,
+  SNAPSHOT_INTERVAL_TICKS,
   DEFAULT_GENOME,
   DEFAULT_PARAMS,
   FERTILITY_DRIFT_DAYS,
@@ -26,6 +28,7 @@ import { regenFactor } from './calendar';
 import { applyMutation, clampGenome, randomGenome, sublineageJump } from './genome';
 import { Rng } from './rng';
 import { decodeSave, encodeSave } from './serialize';
+import { encodeFrame } from './frame';
 import type { Genome, Lineage, MutationKind, SimState, SimStats } from './types';
 
 export interface OrganismeOptions {
@@ -40,13 +43,24 @@ export class Organisme {
   readonly lineages = new Map<number, Lineage>();
   stats: SimStats;
 
+  /** Appelé avec un instantané compact tous les SNAPSHOT_INTERVAL_TICKS. */
+  onSnapshot: ((tick: number, frame: Uint8Array) => void) | null = null;
+
   private rng: Rng;
   private nextLineageId = 1;
+  private cosT: Float64Array;
+  private sinT: Float64Array;
   private pendingSeconds = 0;
   private lastCensusTick = 0;
 
   constructor(readonly backend: Backend, opts: OrganismeOptions = {}) {
     this.size = backend.size;
+    this.cosT = new Float64Array(this.size);
+    this.sinT = new Float64Array(this.size);
+    for (let i = 0; i < this.size; i++) {
+      this.cosT[i] = Math.cos((2 * Math.PI * (i + 0.5)) / this.size);
+      this.sinT[i] = Math.sin((2 * Math.PI * (i + 0.5)) / this.size);
+    }
     this.params = { ...DEFAULT_PARAMS, ...opts.params };
     this.rng = new Rng(opts.seed ?? (Math.random() * 2 ** 32) >>> 0);
     this.stats = this.emptyStats();
@@ -80,6 +94,7 @@ export class Organisme {
       );
       this.tick++;
       if (this.tick - this.lastCensusTick >= CENSUS_INTERVAL_TICKS) this.census();
+      if (this.onSnapshot && this.tick % SNAPSHOT_INTERVAL_TICKS === 0) this.onSnapshot(this.tick, this.snapshot());
     }
   }
 
@@ -87,11 +102,13 @@ export class Organisme {
    * Dépose une spore en (x, y) (coordonnées de case, réelles). Elle hérite du
    * génome vivant le plus proche, puis subit la mutation choisie.
    */
-  spawnSpore(x: number, y: number, mutation: MutationKind | null): Lineage {
+  spawnSpore(x: number, y: number, mutation: MutationKind | null, visitor: string | null = null): Lineage {
     const near = this.nearestLiving(x, y);
     let genome = near ? near.genome : { ...DEFAULT_GENOME, hue: this.rng.next() };
     if (mutation) genome = applyMutation(genome, mutation);
     const lineage = this.registerLineage(near?.lineage ?? null, 'spore', mutation, genome);
+    lineage.visitor = visitor;
+    lineage.history.push(this.tick, 0, x, y);
     this.stamp(0, x, y, genome.radius * this.params.radiusScale * SPORE_RADIUS_FACTOR, lineage.id, 0, genome);
     return lineage;
   }
@@ -174,10 +191,12 @@ export class Organisme {
   census(): SimStats {
     const st = this.backend.read(STATE).slice();
     const n = this.size * this.size;
-    const areas = new Map<number, number>();
+    // Par lignée : surface et somme des angles, pour un centre sur le tore.
+    const areas = new Map<number, Float64Array>();
     let living = 0;
     let biomass = 0;
     let nutrients = 0;
+    const size = this.size;
     for (let i = 0; i < n; i++) {
       const v = st[i * 4];
       const lin = st[i * 4 + 2];
@@ -185,15 +204,27 @@ export class Organisme {
       if (v >= ALIVE_THRESHOLD && lin > 0.5) {
         living++;
         biomass += v;
-        areas.set(lin, (areas.get(lin) ?? 0) + 1);
+        let acc = areas.get(lin);
+        if (!acc) areas.set(lin, (acc = new Float64Array(5)));
+        const x = i % size;
+        const y = (i - x) / size;
+        acc[0]++;
+        acc[1] += this.cosT[x];
+        acc[2] += this.sinT[x];
+        acc[3] += this.cosT[y];
+        acc[4] += this.sinT[y];
       }
     }
     for (const l of this.lineages.values()) {
-      const a = areas.get(l.id) ?? 0;
+      const acc = areas.get(l.id);
+      const a = acc ? acc[0] : 0;
+      const wasAlive = l.area > 0 || l.extinctTick === null;
       l.area = a;
       if (a > l.peakArea) l.peakArea = a;
       if (a === 0 && l.extinctTick === null && this.tick > l.bornTick) l.extinctTick = this.tick;
       if (a > 0) l.extinctTick = null;
+      if (acc) this.record(l, a, this.angleToCell(acc[1], acc[2]), this.angleToCell(acc[3], acc[4]));
+      else if (wasAlive && l.history.length) this.record(l, 0, l.history.at(-2)!, l.history.at(-1)!);
     }
     const elapsed = this.tick - this.lastCensusTick;
     this.lastCensusTick = this.tick;
@@ -256,7 +287,8 @@ export class Organisme {
     this.rng.seed = header.rngSeed;
     this.params = { ...DEFAULT_PARAMS, ...header.params };
     this.lineages.clear();
-    for (const l of header.lineages) this.lineages.set(l.id, l);
+    // Les sauvegardes antérieures à l'histoire n'ont ni visiteur ni histoire.
+    for (const l of header.lineages) this.lineages.set(l.id, { ...l, visitor: l.visitor ?? null, history: l.history ?? [] });
     this.census();
   }
 
@@ -268,6 +300,41 @@ export class Organisme {
 
   private emptyStats(): SimStats {
     return { tick: 0, livingCells: 0, biomass: 0, livingLineages: 0, totalLineages: 0, meanNutrients: 1, meanSediment: 0 };
+  }
+
+  /** Ajoute un point d'histoire (au plus un par tick) et éclaircit les plus anciens. */
+  private record(l: Lineage, area: number, x: number, y: number): void {
+    const h = l.history;
+    if (h.length && h.at(-4)! >= this.tick) {
+      h.splice(h.length - 4, 4);
+    }
+    h.push(this.tick, area, Math.round(x * 10) / 10, Math.round(y * 10) / 10);
+    if (h.length / 4 > HISTORY_MAX_POINTS) {
+      // Garde un point sur deux dans la moitié la plus ancienne.
+      const half = Math.floor(h.length / 8) * 4;
+      const kept: number[] = [];
+      for (let i = 0; i < half; i += 8) kept.push(h[i], h[i + 1], h[i + 2], h[i + 3]);
+      l.history = kept.concat(h.slice(half));
+    }
+  }
+
+  private angleToCell(c: number, s: number): number {
+    const a = Math.atan2(s, c);
+    return ((((a / (2 * Math.PI)) * this.size - 0.5) % this.size) + this.size) % this.size;
+  }
+
+  /** Lignée et toutes ses descendantes (sous-lignées et spores qui en héritent). */
+  descendants(id: number): number[] {
+    const out = [id];
+    for (let i = 0; i < out.length; i++) {
+      for (const l of this.lineages.values()) if (l.parentId === out[i] && !out.includes(l.id)) out.push(l.id);
+    }
+    return out;
+  }
+
+  /** Instantané compact du monde pour le revoir plus tard. */
+  snapshot(): Uint8Array {
+    return encodeFrame(this.tick, this.size, this.backend.read(STATE), this.backend.read(AUX), this.backend.read(SED), ALIVE_THRESHOLD);
   }
 
   private meanSediment(): number {
@@ -301,6 +368,8 @@ export class Organisme {
       area: 0,
       peakArea: 0,
       name: null,
+      visitor: null,
+      history: [],
     };
     this.lineages.set(l.id, l);
     return l;

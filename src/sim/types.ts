@@ -33,6 +33,13 @@ export interface Lineage {
   area: number;
   peakArea: number;
   name: string | null;
+  /** Qui a déposé la spore fondatrice (null : seed ou sous-lignée). */
+  visitor: string | null;
+  /**
+   * Histoire échantillonnée à chaque recensement, à plat : tick, surface,
+   * x, y répétés (x, y = centre du territoire sur le tore, en cases).
+   */
+  history: number[];
 }
 
 /** Instantané lisible côté CPU (une valeur par case, ligne par ligne). */
