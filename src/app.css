@@ -1,0 +1,60 @@
+:root {
+  --bg: #0a0908;
+  --ink: #d9d2c5;
+  --ink-dim: #8f877a;
+  --ink-faint: #5a544b;
+  --panel: rgba(14, 12, 10, 0.72);
+  --line: rgba(217, 210, 197, 0.14);
+  --accent: #c9b48a;
+  --serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+  --sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.45em 0.85em;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+
+button:hover {
+  border-color: rgba(217, 210, 197, 0.32);
+}
+
+button.on {
+  background: rgba(217, 210, 197, 0.14);
+  border-color: rgba(217, 210, 197, 0.42);
+  color: #f1ebdf;
+}
+
+button:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}

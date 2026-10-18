@@ -1,0 +1,137 @@
+// Shaders du rendu : une passe de préparation à la résolution de la grille,
+// puis une composition plein écran avec filtrage bicubique (pas de damier).
+
+import { COMMON_GLSL } from '../sim/shaders';
+
+/** Prépare trois textures filtrables à partir des textures de simulation. */
+export const PREP_SHADER = /* glsl */ `#version 300 es
+precision highp float;
+precision highp sampler2D;
+uniform sampler2D uState;
+uniform sampler2D uAux;
+uniform sampler2D uSed;
+uniform float uAliveT;
+uniform float uSedScale;
+layout(location = 0) out vec4 oLife;
+layout(location = 1) out vec4 oGround;
+layout(location = 2) out vec4 oField;
+${COMMON_GLSL}
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec4 s = texelFetch(uState, p, 0);
+  vec4 a = texelFetch(uAux, p, 0);
+  vec4 sed = texelFetch(uSed, p, 0);
+  float v = s.z > 0.5 ? s.x : 0.0;
+  oLife = vec4(hueColor(a.x) * v, v);
+  oGround = vec4(sed.rgb, 1.0 - exp(-sed.a * uSedScale));
+  oField = vec4(s.y, a.z, s.x >= uAliveT ? 0.0 : a.y, fract(a.x));
+}
+`;
+
+export const COMPOSITE_SHADER = /* glsl */ `#version 300 es
+precision highp float;
+precision highp sampler2D;
+uniform sampler2D uLife;
+uniform sampler2D uGround;
+uniform sampler2D uField;
+uniform vec2 uResolution;
+uniform vec2 uCenter;
+uniform float uScale;
+uniform int uClip;
+uniform int uLayer;
+uniform float uTime;
+uniform float uDaylight;
+uniform float uGrid;
+uniform vec3 uEarth;
+out vec4 outColor;
+
+// B-spline bicubique à partir de 4 lectures bilinéaires.
+vec4 smoothTex(sampler2D t, vec2 uv) {
+  vec2 st = uv * uGrid - 0.5;
+  vec2 i = floor(st);
+  vec2 f = st - i;
+  vec2 w0 = (1.0 - f) * (1.0 - f) * (1.0 - f) / 6.0;
+  vec2 w1 = (4.0 - 6.0 * f * f + 3.0 * f * f * f) / 6.0;
+  vec2 w2 = (1.0 + 3.0 * f + 3.0 * f * f - 3.0 * f * f * f) / 6.0;
+  vec2 w3 = f * f * f / 6.0;
+  vec2 g0 = w0 + w1;
+  vec2 g1 = w2 + w3;
+  vec2 h0 = (i - 0.5 + w1 / g0) / uGrid;
+  vec2 h1 = (i + 1.5 + w3 / g1) / uGrid;
+  return g0.y * (g0.x * textureLod(t, vec2(h0.x, h0.y), 0.0) + g1.x * textureLod(t, vec2(h1.x, h0.y), 0.0))
+       + g1.y * (g0.x * textureLod(t, vec2(h0.x, h1.y), 0.0) + g1.x * textureLod(t, vec2(h1.x, h1.y), 0.0));
+}
+
+float hash12(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+
+vec3 nutrientMap(float n) {
+  return mix(mix(vec3(0.02, 0.03, 0.05), vec3(0.05, 0.28, 0.32), smoothstep(0.0, 0.6, n)), vec3(0.75, 0.9, 0.82), smoothstep(0.6, 1.0, n));
+}
+
+void main() {
+  vec2 frag = gl_FragCoord.xy;
+  vec2 uv = (frag - uCenter) / uScale + 0.5;
+  if (uClip == 1 && (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0)) {
+    outColor = vec4(0.02, 0.018, 0.016, 1.0);
+    return;
+  }
+  vec4 life = smoothTex(uLife, uv);
+  vec4 ground = smoothTex(uGround, uv);
+  vec4 field = smoothTex(uField, uv);
+  float v = clamp(life.a, 0.0, 1.0);
+  vec3 hc = life.rgb / max(life.a, 1e-3);
+
+  vec3 col;
+  if (uLayer == 1) {
+    col = vec3(v);
+  } else if (uLayer == 2) {
+    float body = smoothstep(0.01, 0.08, v);
+    vec3 ghost = vec3(0.12) * smoothstep(0.0, 0.3, field.z);
+    col = mix(ghost, hc * 1.25, body);
+  } else if (uLayer == 3) {
+    col = nutrientMap(clamp(field.x, 0.0, 1.0));
+  } else if (uLayer == 4) {
+    col = mix(vec3(0.0), ground.rgb * 1.6, clamp(ground.a, 0.0, 1.0));
+  } else {
+    // Fond terreux : sédiment accumulé sur une terre sombre.
+    vec3 soil = mix(uEarth * 0.6, ground.rgb * 0.6, clamp(ground.a, 0.0, 1.0) * 0.85);
+
+    // Lueur des nutriments sous la surface, floue et respirant avec le jour.
+    float nutBlur = textureLod(uField, uv, 2.5).x;
+    float light = 0.75 + 0.25 * uDaylight;
+    soil += vec3(0.06, 0.16, 0.15) * pow(clamp(nutBlur, 0.0, 1.0), 2.2) * 0.35 * light;
+
+    // Halo diffus autour du vivant.
+    vec4 haloT = textureLod(uLife, uv, 3.0);
+    vec3 haloC = haloT.rgb / max(haloT.a, 1e-3);
+    soil += haloC * smoothstep(0.0, 0.5, haloT.a) * 0.10;
+
+    // Corps : bords doux, lumière rasante sur le gradient, légère pulsation.
+    vec2 e = vec2(1.0 / uGrid, 0.0);
+    float gx = textureLod(uLife, uv + e.xy, 0.0).a - textureLod(uLife, uv - e.xy, 0.0).a;
+    float gy = textureLod(uLife, uv + e.yx, 0.0).a - textureLod(uLife, uv - e.yx, 0.0).a;
+    vec2 grad = vec2(gx, gy);
+    float rim = clamp(length(grad) * 3.0, 0.0, 1.0);
+    float shade = clamp(0.5 + dot(normalize(grad + 1e-5), vec2(-0.6, 0.8)) * length(grad) * 2.0, 0.0, 1.0);
+    float phase = field.w * 6.2831853;
+    float pulse = 1.0 + 0.06 * sin(uTime * 0.9 + phase + v * 3.0);
+    float grow = clamp(field.y * 40.0, -1.0, 1.0);
+    vec3 body = hc * (0.18 + 0.85 * pow(v, 0.8)) * pulse;
+    body += hc * rim * 0.25 + vec3(0.9, 0.85, 0.75) * max(grow, 0.0) * 0.06 * v;
+    body *= 0.85 + 0.3 * shade;
+    body *= 0.8 + 0.2 * light;
+    float cover = smoothstep(0.015, 0.35, v);
+    col = mix(soil, body, cover * 0.95);
+
+    // Vignette et grain très léger.
+    vec2 q = frag / uResolution - 0.5;
+    col *= 1.0 - 0.45 * dot(q, q);
+    col += (hash12(frag + fract(uTime) * 100.0) - 0.5) * 0.012;
+  }
+  outColor = vec4(pow(max(col, 0.0), vec3(1.0 / 1.1)), 1.0);
+}
+`;
