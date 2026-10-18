@@ -17,6 +17,23 @@ export type MutationKind = 'gourmande' | 'sobre' | 'expansive' | 'compacte' | 't
 
 export const MUTATION_KINDS: MutationKind[] = ['gourmande', 'sobre', 'expansive', 'compacte', 'teinte'];
 
+/** Gènes réglables par le visiteur ; le sens + est celui de la vigueur. */
+export type DnaGene = 'appetit' | 'envergure' | 'tolerance' | 'audace';
+
+export const DNA_GENES: DnaGene[] = ['appetit', 'envergure', 'tolerance', 'audace'];
+
+/**
+ * ADN choisi par le visiteur : un niveau entier par gène (somme nulle, chaque
+ * gain de vigueur se paie ailleurs) et un décalage de teinte libre.
+ */
+export interface Dna {
+  appetit: number;
+  envergure: number;
+  tolerance: number;
+  audace: number;
+  teinte: number;
+}
+
 export type LineageOrigin = 'spore' | 'sous-lignee';
 
 export interface Lineage {
@@ -24,6 +41,8 @@ export interface Lineage {
   parentId: number | null;
   origin: LineageOrigin;
   mutation: MutationKind | null;
+  /** ADN choisi par le visiteur à la fondation, s'il y en a un. */
+  dna: Dna | null;
   /** Génome fondateur (au moment de la naissance de la lignée). */
   founder: Genome;
   bornTick: number;

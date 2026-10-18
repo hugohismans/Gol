@@ -25,11 +25,11 @@ import type { Params } from './config';
 import { AUX, GENOME, SED, STAMP_DEFAULTS, STATE, stepConstants } from './backend';
 import type { Backend } from './backend';
 import { regenFactor } from './calendar';
-import { applyMutation, clampGenome, randomGenome, sublineageJump } from './genome';
+import { applyDna, applyMutation, clampGenome, randomGenome, sublineageJump } from './genome';
 import { Rng } from './rng';
 import { decodeSave, encodeSave } from './serialize';
 import { encodeFrame } from './frame';
-import type { Genome, Lineage, MutationKind, SimState, SimStats } from './types';
+import type { Dna, Genome, Lineage, MutationKind, SimState, SimStats } from './types';
 
 export interface OrganismeOptions {
   seed?: number;
@@ -102,12 +102,36 @@ export class Organisme {
    * Dépose une spore en (x, y) (coordonnées de case, réelles). Elle hérite du
    * génome vivant le plus proche, puis subit la mutation choisie.
    */
-  spawnSpore(x: number, y: number, mutation: MutationKind | null, visitor: string | null = null): Lineage {
+  spawnSpore(x: number, y: number, mutation: MutationKind | Dna | null, visitor: string | null = null): Lineage {
+    const base = this.inheritedGenome(x, y);
+    const dna = mutation && typeof mutation === 'object' ? mutation : null;
+    const kind = typeof mutation === 'string' ? mutation : null;
+    let genome = base.genome;
+    if (kind) genome = applyMutation(genome, kind);
+    if (dna) genome = applyDna(genome, dna);
+    return this.plant(x, y, genome, { parentId: base.lineage, visitor, mutation: kind, dna });
+  }
+
+  /**
+   * Génome dont hériterait une spore déposée en (x, y) : celui de la case
+   * vivante la plus proche, ou le génome par défaut dans un monde vide.
+   */
+  inheritedGenome(x: number, y: number): { lineage: number | null; genome: Genome } {
     const near = this.nearestLiving(x, y);
-    let genome = near ? near.genome : { ...DEFAULT_GENOME, hue: this.rng.next() };
-    if (mutation) genome = applyMutation(genome, mutation);
-    const lineage = this.registerLineage(near?.lineage ?? null, 'spore', mutation, genome);
-    lineage.visitor = visitor;
+    return near ?? { lineage: null, genome: { ...DEFAULT_GENOME, hue: this.rng.next() } };
+  }
+
+  /** Dépose une spore d'un génome donné (déjà hérité et muté). */
+  plant(
+    x: number,
+    y: number,
+    genome: Genome,
+    o: { parentId?: number | null; visitor?: string | null; mutation?: MutationKind | null; dna?: Dna | null; name?: string | null } = {},
+  ): Lineage {
+    const lineage = this.registerLineage(o.parentId ?? null, 'spore', o.mutation ?? null, genome);
+    lineage.visitor = o.visitor ?? null;
+    lineage.dna = o.dna ?? null;
+    lineage.name = o.name?.trim() || null;
     lineage.history.push(this.tick, 0, x, y);
     this.stamp(0, x, y, genome.radius * this.params.radiusScale * SPORE_RADIUS_FACTOR, lineage.id, 0, genome);
     return lineage;
@@ -288,7 +312,7 @@ export class Organisme {
     this.params = { ...DEFAULT_PARAMS, ...header.params };
     this.lineages.clear();
     // Les sauvegardes antérieures à l'histoire n'ont ni visiteur ni histoire.
-    for (const l of header.lineages) this.lineages.set(l.id, { ...l, visitor: l.visitor ?? null, history: l.history ?? [] });
+    for (const l of header.lineages) this.lineages.set(l.id, { ...l, visitor: l.visitor ?? null, dna: l.dna ?? null, history: l.history ?? [] });
     this.census();
   }
 
@@ -368,6 +392,7 @@ export class Organisme {
       area: 0,
       peakArea: 0,
       name: null,
+      dna: null,
       visitor: null,
       history: [],
     };

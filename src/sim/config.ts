@@ -3,7 +3,7 @@
 // exprimée en unités de temps Lenia (multipliée par LENIA_DT à chaque tick),
 // les nutriments et le sédiment sont exprimés par tick.
 
-import type { Genome, MutationKind } from './types';
+import type { DnaGene, Genome, MutationKind } from './types';
 
 // --- Monde ---------------------------------------------------------------
 
@@ -96,6 +96,24 @@ export const MUTATION_EFFECTS: Record<MutationKind, Partial<Genome>> = {
   compacte: { radius: 0.88, mu: 1.04, sigma: 0.93 },
   teinte: { hue: 0.09 },
 };
+
+/** Niveau maximal d'un gène d'ADN, dans un sens ou dans l'autre. */
+export const DNA_MAX_LEVEL = 3;
+
+/**
+ * Effet d'un niveau d'ADN : facteur multiplicatif par niveau sur le gène du
+ * génome. Le sens + est celui de la vigueur (plus gourmande, plus étendue,
+ * plus tolérante, plus audacieuse : pousse là où le voisinage est plus maigre).
+ */
+export const DNA_EFFECTS: Record<DnaGene, { gene: keyof Genome; factor: number }> = {
+  appetit: { gene: 'appetite', factor: 1.08 },
+  envergure: { gene: 'radius', factor: 1.05 },
+  tolerance: { gene: 'sigma', factor: 1.05 },
+  audace: { gene: 'mu', factor: 0.97 },
+};
+
+/** Décalage de teinte maximal choisi par le visiteur (en tour de cercle). */
+export const DNA_HUE_RANGE = 0.15;
 
 /** Écart type relatif de la mutation gaussienne à chaque naissance (avant taux global). */
 export const BIRTH_MUTATION_SIGMA = {
