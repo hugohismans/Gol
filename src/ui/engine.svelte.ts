@@ -19,6 +19,8 @@ const MAX_TICKS_PER_FRAME = 4000;
 const FRAME_BUDGET_MS = 22;
 const AUTOSAVE_MS = 20000;
 const UI_REFRESH_MS = 200;
+/** Le rendu est doux : au delà, la résolution coûte sans se voir. */
+const MAX_PIXEL_RATIO = 1.5;
 
 export type Speed = (typeof SPEEDS)[number];
 
@@ -168,7 +170,7 @@ export class Engine {
   /** Taille du canvas en pixels physiques. */
   resize(canvas: HTMLCanvasElement, cssW: number, cssH: number): void {
     if (cssW === 0 || cssH === 0) return;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const dpr = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
     canvas.width = Math.round(cssW * dpr);
     canvas.height = Math.round(cssH * dpr);
   }
