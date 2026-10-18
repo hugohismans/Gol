@@ -34,3 +34,15 @@ Une spore par jour. Hérite du génome le plus proche, une seule mutation au cho
 Phase 1 (en cours) : prototype client avec accélération du temps et spores illimitées.
 Phase 2 : simulation dans un Durable Object, WebSocket, cookie, une spore par jour.
 Phase 3 : lignées nommées, arbre généalogique, snapshots R2, timelapse.
+
+## Architecture (phase 1)
+- src/sim/organisme.ts porte la logique du monde (calendrier, lignées, recensement, spores, sauvegarde) et délègue le calcul des champs à un Backend.
+- Deux moteurs appliquent les mêmes règles : src/sim/gpu/ (WebGL2, navigateur) et src/sim/cpu/ (TypeScript pur, tests et futur serveur). Toute modification d'une règle se fait dans src/sim/gpu/shaders.ts ET src/sim/cpu/backend.ts, puis se vérifie avec scripts/dev/compare.mjs.
+- Le banc de survie (scripts/survie-cpu.ts) mesure la survie sur la durée hors navigateur.
+
+## Ajouts du prototype à valider
+- Lignée fantôme : une case morte porte la lignée la plus influente de son voisinage ; c'est le génome dont elle hérite si elle naît (implémentation de "la lignée dominante autour").
+- Consommation saturante : vitalité x appétit x N / (N + uptakeHalf).
+- Fertilité du sol : la régénération varie dans l'espace selon une carte douce qui dérive en quelques semaines (fertilityContrast, 0 = sol uniforme).
+- Sénescence : une case vivante décline après quelques jours d'âge.
+- Nutriments initiaux réglables (initialNutrients).
