@@ -5,12 +5,16 @@ import { TICKS_PER_DAY } from './sim/config';
 import type { Params } from './sim/config';
 import { daylight } from './sim/calendar';
 import { Organisme } from './sim/organisme';
+import { GpuBackend } from './sim/gpu/backend';
+import { GRID_SIZE } from './sim/config';
+import { CpuBackend } from './sim/cpu/backend';
 import { Renderer } from './render/renderer';
 import type { Layer } from './render/renderer';
 
 const canvas = document.getElementById('c') as HTMLCanvasElement;
 const gl = canvas.getContext('webgl2', { preserveDrawingBuffer: true })!;
 let sim: Organisme;
+let gpu: GpuBackend;
 let renderer: Renderer;
 
 const harness = {
@@ -18,7 +22,8 @@ const harness = {
   init(seed: number, params: Partial<Params> = {}, spores = 10, size?: number) {
     sim?.dispose();
     renderer?.dispose();
-    sim = new Organisme(gl, { seed, params, size });
+    gpu = new GpuBackend(gl, size ?? GRID_SIZE);
+    sim = new Organisme(gpu, { seed, params });
     renderer = new Renderer(gl, sim.size);
     sim.seedRandom(spores);
     return sim.census();
@@ -42,7 +47,7 @@ const harness = {
     return out;
   },
   render(layer: Layer = 'final') {
-    renderer.render(sim.textures, canvas.width, canvas.height, { centerX: canvas.width / 2, centerY: canvas.height / 2, scale: canvas.width, clip: false }, layer, performance.now() / 1000, daylight(sim.tick));
+    renderer.render(gpu.textures, canvas.width, canvas.height, { centerX: canvas.width / 2, centerY: canvas.height / 2, scale: canvas.width, clip: false }, layer, performance.now() / 1000, daylight(sim.tick));
     gl.finish();
   },
   genomeStats() {
@@ -57,6 +62,35 @@ const harness = {
   },
   lineages() {
     return [...sim.lineages.values()].map((l) => ({ id: l.id, parent: l.parentId, area: l.area, peak: l.peakArea, extinct: l.extinctTick }));
+  },
+  /** Compare les moteurs GPU et CPU sur les mêmes conditions initiales. */
+  compare(ticks: number, size = 64) {
+    const a = new Organisme(new GpuBackend(gl, size), { seed: 7 });
+    const b = new Organisme(new CpuBackend(size), { seed: 7 });
+    a.seedRandom(3);
+    b.seedRandom(3);
+    const out = [];
+    for (const k of [1, ticks]) {
+      const done = a.tick;
+      a.runTicks(k - done);
+      b.runTicks(k - done);
+      const sa = a.getState();
+      const sb = b.getState();
+      const diff = (x: Float32Array, y: Float32Array) => x.reduce((m, v, i) => Math.max(m, Math.abs(v - y[i])), 0);
+      let linMismatch = 0;
+      for (let i = 0; i < sa.lineage.length; i++) if (sa.lineage[i] !== sb.lineage[i]) linMismatch++;
+      out.push({
+        tick: k,
+        vitalite: diff(sa.vitality, sb.vitality),
+        nutriments: diff(sa.nutrients, sb.nutrients),
+        rayon: diff(sa.radius, sb.radius),
+        sediment: diff(sa.sediment, sb.sediment),
+        lignees: linMismatch,
+        biomasse: [a.census().biomass, b.census().biomass],
+      });
+    }
+    a.dispose();
+    return out;
   },
   roundTrip() {
     const bytes = sim.serialize();

@@ -11,12 +11,16 @@
 // c'est le génome qu'elle utilise pour évaluer sa croissance, et dont elle
 // hérite (avec mutation) si elle naît.
 
+import { HUE_CHROMA, HUE_LIGHTNESS } from '../config';
+
 export const VERTEX_SHADER = /* glsl */ `#version 300 es
 in vec2 aPos;
 void main() { gl_Position = vec4(aPos, 0.0, 1.0); }
 `;
 
 export const COMMON_GLSL = /* glsl */ `
+#define HUE_L ${HUE_LIGHTNESS.toFixed(4)}
+#define HUE_C ${HUE_CHROMA.toFixed(4)}
 uint hash(uint x) {
   x ^= x >> 16; x *= 0x7feb352du;
   x ^= x >> 15; x *= 0x846ca68bu;
@@ -29,12 +33,22 @@ float gauss(inout uint s) {
   float u2 = rnd(s);
   return sqrt(-2.0 * log(u1)) * cos(6.2831853 * u2);
 }
-// Couleur d'une teinte, désaturée pour rester sobre.
-vec3 hueColor(float h) {
-  vec3 c = 0.5 + 0.5 * cos(6.2831853 * (h + vec3(0.0, 0.6667, 0.3333)));
-  float l = dot(c, vec3(0.299, 0.587, 0.114));
-  return mix(vec3(l), c, 0.62);
+// Couleur d'une teinte en OKLCH (luminosité et chroma fixes, donc sobre et
+// homogène), convertie en sRGB approché.
+vec3 oklch(float L, float C, float h) {
+  float a = C * cos(6.2831853 * h);
+  float b = C * sin(6.2831853 * h);
+  float l = L + 0.3963377774 * a + 0.2158037573 * b;
+  float m = L - 0.1055613458 * a - 0.0638541728 * b;
+  float s = L - 0.0894841775 * a - 1.2914855480 * b;
+  l = l * l * l; m = m * m * m; s = s * s * s;
+  vec3 lin = vec3(
+    4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s);
+  return pow(clamp(lin, 0.0, 1.0), vec3(1.0 / 2.2));
 }
+vec3 hueColor(float h) { return oklch(HUE_L, HUE_C, h); }
 `;
 
 export function stepShader(tapCount: number): string {
@@ -66,6 +80,7 @@ uniform float uRegen;
 uniform float uDiffusion;
 uniform float uConsumption;
 uniform float uNutHalf;
+uniform float uUptakeHalf;
 uniform float uStarvation;
 uniform float uStarveBelow;
 uniform float uSenescence;
@@ -137,14 +152,17 @@ void main() {
   }
 
   // Potentiel : convolution de la vitalité par le kernel en anneau de la case.
-  float R = g.x * uRadiusScale;
-  float lod = max(0.0, log2(R / uLodGap));
-  vec2 c = (vec2(p) + 0.5) / float(uSize);
-  float scale = R / float(uSize);
+  // Sans lignée, rien ne peut pousser : inutile de calculer le potentiel.
   float U = 0.0;
-  for (int i = 0; i < ${tapCount}; i++) {
-    vec4 t = uTaps[i];
-    U += t.z * textureLod(uVit, c + t.xy * scale, lod).r;
+  if (lin > 0.5) {
+    float R = g.x * uRadiusScale;
+    float lod = max(0.0, log2(R / uLodGap));
+    vec2 c = (vec2(p) + 0.5) / float(uSize);
+    float scale = R / float(uSize);
+    for (int i = 0; i < ${tapCount}; i++) {
+      vec4 t = uTaps[i];
+      U += t.z * textureLod(uVit, c + t.xy * scale, lod).r;
+    }
   }
 
   // Croissance en cloche, modulée par les nutriments et l'appétit.
@@ -166,7 +184,7 @@ void main() {
             + texelFetch(uState, wrap(p + ivec2(0, 1)), 0).y
             + texelFetch(uState, wrap(p + ivec2(0, -1)), 0).y
             - 4.0 * nut;
-  float consume = min(nut, nv * app * uConsumption);
+  float consume = min(nut, nv * app * uConsumption * nut / (nut + uUptakeHalf + 1e-6));
   float nn = clamp(nut + uDiffusion * lap + uRegen * (1.0 - nut) - consume, 0.0, 1.0);
 
   // Naissance : héritage du génome fantôme avec mutation gaussienne légère.

@@ -1,7 +1,7 @@
 // Shaders du rendu : une passe de préparation à la résolution de la grille,
 // puis une composition plein écran avec filtrage bicubique (pas de damier).
 
-import { COMMON_GLSL } from '../sim/shaders';
+import { COMMON_GLSL } from '../sim/gpu/shaders';
 
 /** Prépare trois textures filtrables à partir des textures de simulation. */
 export const PREP_SHADER = /* glsl */ `#version 300 es

@@ -1,67 +1,34 @@
 // Organisme : la simulation vue de l'extérieur.
 // API : step(dt), spawnSpore(x, y, mutation), getState().
-// Le calcul tourne sur le GPU (ping-pong de textures WebGL2), mais rien ici
-// ne touche au DOM : on reçoit un contexte WebGL2 déjà créé.
+// La logique du monde (calendrier, lignées, recensement, spores) vit ici ;
+// le calcul des champs est délégué à un Backend (GPU ou CPU). Aucun accès au DOM.
 
 import {
   ALIVE_THRESHOLD,
-  BIRTH_MUTATION_SIGMA,
   CENSUS_INTERVAL_TICKS,
   DEFAULT_GENOME,
   DEFAULT_PARAMS,
-  GENOME_BOUNDS,
-  GHOST_DECAY,
-  GHOST_MIN_INFLUENCE,
-  GRID_SIZE,
-  KERNEL_LOD_GAP,
-  KERNEL_TAP_DENSITY,
-  LENIA_DT,
   SAVE_VERSION,
   SECONDS_PER_TICK,
-  SEDIMENT_COLOR_MEMORY,
   SEDIMENT_EARTH,
   SEED_SPORE_COUNT,
-  SPORE_DENSITY,
   SPORE_INHERIT_SEARCH_RADIUS,
-  SPORE_NUTRIENT_BOOST,
   SPORE_RADIUS_FACTOR,
   SUBLINEAGE_PATCH_RADIUS,
   TICKS_PER_DAY,
 } from './config';
 import type { Params } from './config';
+import { AUX, GENOME, SED, STAMP_DEFAULTS, STATE, stepConstants } from './backend';
+import type { Backend } from './backend';
 import { regenFactor } from './calendar';
 import { applyMutation, clampGenome, randomGenome, sublineageJump } from './genome';
-import { Program, createFramebuffer, createFullscreenTriangle, createTexture, requireFloatTargets } from './gl';
-import { buildKernelTaps } from './kernel';
 import { Rng } from './rng';
 import { decodeSave, encodeSave } from './serialize';
-import { COPY_VIT_SHADER, STAMP_SHADER, VERTEX_SHADER, stepShader } from './shaders';
 import type { Genome, Lineage, MutationKind, SimState, SimStats } from './types';
-
-/** Index des textures d'état dans un jeu de ping-pong. */
-const STATE = 0;
-const GENOME = 1;
-const AUX = 2;
-const SED = 3;
-
-interface Buffers {
-  tex: WebGLTexture[];
-  fbo: WebGLFramebuffer;
-}
 
 export interface OrganismeOptions {
   seed?: number;
-  /** Côté de la grille, GRID_SIZE par défaut (plus petit pour les essais rapides). */
-  size?: number;
   params?: Partial<Params>;
-}
-
-export interface SimTextures {
-  state: WebGLTexture;
-  genome: WebGLTexture;
-  aux: WebGLTexture;
-  sediment: WebGLTexture;
-  vitality: WebGLTexture;
 }
 
 export class Organisme {
@@ -71,48 +38,15 @@ export class Organisme {
   readonly lineages = new Map<number, Lineage>();
   stats: SimStats;
 
-  private gl: WebGL2RenderingContext;
   private rng: Rng;
   private nextLineageId = 1;
   private pendingSeconds = 0;
   private lastCensusTick = 0;
-  private cur = 0;
-  private bufs: Buffers[];
-  private vitTex: WebGLTexture;
-  private vitFbo: WebGLFramebuffer;
-  private vao: WebGLVertexArrayObject;
-  private stepProg: Program;
-  private copyProg: Program;
-  private stampProg: Program;
-  private taps: Float32Array;
-  private cache = new Map<number, { tick: number; data: Float32Array }>();
 
-  constructor(gl: WebGL2RenderingContext, opts: OrganismeOptions = {}) {
-    this.gl = gl;
-    this.size = opts.size ?? GRID_SIZE;
-    requireFloatTargets(gl);
+  constructor(readonly backend: Backend, opts: OrganismeOptions = {}) {
+    this.size = backend.size;
     this.params = { ...DEFAULT_PARAMS, ...opts.params };
     this.rng = new Rng(opts.seed ?? (Math.random() * 2 ** 32) >>> 0);
-    this.taps = buildKernelTaps();
-    this.vao = createFullscreenTriangle(gl);
-    this.stepProg = new Program(gl, VERTEX_SHADER, stepShader(this.taps.length / 4));
-    this.copyProg = new Program(gl, VERTEX_SHADER, COPY_VIT_SHADER);
-    this.stampProg = new Program(gl, VERTEX_SHADER, STAMP_SHADER);
-
-    const n = this.size;
-    const make = () => {
-      const tex = [0, 1, 2, 3].map(() =>
-        createTexture(gl, n, n, {
-          internalFormat: gl.RGBA32F, format: gl.RGBA, type: gl.FLOAT, filter: gl.NEAREST, wrap: gl.CLAMP_TO_EDGE,
-        }),
-      );
-      return { tex, fbo: createFramebuffer(gl, tex) };
-    };
-    this.bufs = [make(), make()];
-    this.vitTex = createTexture(gl, n, n, {
-      internalFormat: gl.R16F, format: gl.RED, type: gl.HALF_FLOAT, filter: gl.LINEAR, wrap: gl.REPEAT, mipmaps: true,
-    });
-    this.vitFbo = createFramebuffer(gl, [this.vitTex]);
     this.stats = this.emptyStats();
     this.reset();
   }
@@ -134,33 +68,13 @@ export class Organisme {
   /** Joue exactement n ticks. */
   runTicks(n: number): void {
     if (n <= 0) return;
-    const gl = this.gl;
-    this.bindStepUniforms();
-    gl.viewport(0, 0, this.size, this.size);
-    gl.bindVertexArray(this.vao);
-    gl.disable(gl.BLEND);
+    this.backend.configure(stepConstants(this.params));
     for (let i = 0; i < n; i++) {
-      const src = this.bufs[this.cur];
-      const dst = this.bufs[1 - this.cur];
-      const p = this.stepProg.use();
-      p.f('uRegen', this.params.regenRate * regenFactor(this.tick, this.params.dayAmplitude, this.params.seasonAmplitude));
-      p.u('uSeed', this.rng.next() * 4294967296);
-      p.tex('uState', 0, src.tex[STATE]).tex('uGenome', 1, src.tex[GENOME]).tex('uAux', 2, src.tex[AUX]);
-      p.tex('uSed', 3, src.tex[SED]).tex('uVit', 4, this.vitTex);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fbo);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-      this.cur = 1 - this.cur;
+      const q = this.params;
+      this.backend.tick(q.regenRate * regenFactor(this.tick, q.dayAmplitude, q.seasonAmplitude), this.seed());
       this.tick++;
-      this.refreshVitality();
-      if (this.tick - this.lastCensusTick >= CENSUS_INTERVAL_TICKS) {
-        this.census();
-        this.bindStepUniforms();
-        gl.viewport(0, 0, this.size, this.size);
-        gl.bindVertexArray(this.vao);
-      }
+      if (this.tick - this.lastCensusTick >= CENSUS_INTERVAL_TICKS) this.census();
     }
-    gl.bindVertexArray(null);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
   /**
@@ -189,10 +103,10 @@ export class Organisme {
 
   /** Instantané complet lu depuis le GPU. */
   getState(): SimState {
-    const st = this.read(STATE);
-    const ge = this.read(GENOME);
-    const au = this.read(AUX);
-    const se = this.read(SED);
+    const st = this.backend.read(STATE);
+    const ge = this.backend.read(GENOME);
+    const au = this.backend.read(AUX);
+    const se = this.backend.read(SED);
     const n = this.size * this.size;
     const s: SimState = {
       tick: this.tick,
@@ -241,7 +155,7 @@ export class Organisme {
       genome.set([g.radius, g.mu, g.sigma, g.appetite], i * 4);
       sed.set(SEDIMENT_EARTH, i * 4);
     }
-    this.upload([state, genome, aux, sed]);
+    this.backend.upload([state, genome, aux, sed]);
     this.tick = 0;
     this.pendingSeconds = 0;
     this.lastCensusTick = 0;
@@ -252,7 +166,7 @@ export class Organisme {
 
   /** Recensement : lignées vivantes, surface, extinctions, sous-lignées. */
   census(): SimStats {
-    const st = this.read(STATE);
+    const st = this.backend.read(STATE).slice();
     const n = this.size * this.size;
     const areas = new Map<number, number>();
     let living = 0;
@@ -288,12 +202,6 @@ export class Organisme {
     const events = this.rng.poisson(this.params.sublineageRate * living * elapsed);
     for (let e = 0; e < events; e++) this.spawnSublineage(st);
     return this.stats;
-  }
-
-  /** Textures courantes, pour le rendu. */
-  get textures(): SimTextures {
-    const b = this.bufs[this.cur];
-    return { state: b.tex[STATE], genome: b.tex[GENOME], aux: b.tex[AUX], sediment: b.tex[SED], vitality: this.vitTex };
   }
 
   get ageDays(): number {
@@ -333,7 +241,7 @@ export class Organisme {
       aux.set([s.hue[i], alive ? s.vitality[i] : 0, 0, 0], j);
       sed.set([s.sedimentColor[i * 3], s.sedimentColor[i * 3 + 1], s.sedimentColor[i * 3 + 2], s.sediment[i]], j);
     }
-    this.upload([state, genome, aux, sed]);
+    this.backend.upload([state, genome, aux, sed]);
     this.tick = header.tick;
     this.lastCensusTick = header.tick;
     this.pendingSeconds = 0;
@@ -346,16 +254,7 @@ export class Organisme {
   }
 
   dispose(): void {
-    const gl = this.gl;
-    for (const b of this.bufs) {
-      b.tex.forEach((t) => gl.deleteTexture(t));
-      gl.deleteFramebuffer(b.fbo);
-    }
-    gl.deleteTexture(this.vitTex);
-    gl.deleteFramebuffer(this.vitFbo);
-    this.stepProg.dispose();
-    this.copyProg.dispose();
-    this.stampProg.dispose();
+    this.backend.dispose();
   }
 
   // --- Interne -----------------------------------------------------------
@@ -364,91 +263,16 @@ export class Organisme {
     return { tick: 0, livingCells: 0, biomass: 0, livingLineages: 0, totalLineages: 0, meanNutrients: 1 };
   }
 
-  private bindStepUniforms(): void {
-    const p = this.stepProg.use();
-    const q = this.params;
-    const b = GENOME_BOUNDS;
-    this.gl.uniform4fv(p.loc('uTaps'), this.taps);
-    p.i('uSize', this.size);
-    p.f('uDt', LENIA_DT).f('uAliveT', ALIVE_THRESHOLD).f('uLodGap', KERNEL_TAP_DENSITY * KERNEL_LOD_GAP);
-    p.f('uRadiusScale', q.radiusScale).f('uMuOffset', q.muOffset).f('uSigmaScale', q.sigmaScale);
-    p.f('uAppetiteScale', q.appetiteScale).f('uAppetiteGrowth', q.appetiteGrowth);
-    p.f('uDiffusion', q.diffusion).f('uConsumption', q.consumption).f('uNutHalf', q.nutrientHalf);
-    p.f('uStarvation', q.starvation).f('uStarveBelow', q.starveBelow).f('uSenescence', q.senescence);
-    p.f('uSenescenceAge', q.senescenceStartDays * TICKS_PER_DAY, Math.max(q.senescenceFullDays, q.senescenceStartDays + 0.01) * TICKS_PER_DAY);
-    p.f('uGhostDecay', GHOST_DECAY).f('uGhostMin', GHOST_MIN_INFLUENCE);
-    p.f('uMutationRate', q.mutationRate);
-    const m = BIRTH_MUTATION_SIGMA;
-    p.f('uMutSigma', m.radius, m.mu, m.sigma, m.appetite).f('uMutHue', m.hue);
-    p.f('uRadiusBounds', ...b.radius).f('uMuBounds', ...b.mu).f('uSigmaBounds', ...b.sigma).f('uAppetiteBounds', ...b.appetite);
-    p.f('uSedRate', q.sedimentRate).f('uSedDarken', q.sedimentDarkening).f('uSedMemory', SEDIMENT_COLOR_MEMORY);
-    p.f('uEarth', ...SEDIMENT_EARTH);
-  }
-
-  /** Recopie la vitalité dans la texture filtrable et régénère ses mipmaps. */
-  private refreshVitality(): void {
-    const gl = this.gl;
-    this.copyProg.use().tex('uState', 0, this.bufs[this.cur].tex[STATE]);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.vitFbo);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-    gl.bindTexture(gl.TEXTURE_2D, this.vitTex);
-    gl.generateMipmap(gl.TEXTURE_2D);
-  }
-
-  private upload(data: Float32Array[]): void {
-    const gl = this.gl;
-    for (const b of this.bufs) {
-      data.forEach((d, i) => {
-        gl.bindTexture(gl.TEXTURE_2D, b.tex[i]);
-        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.size, this.size, gl.RGBA, gl.FLOAT, d);
-      });
-    }
-    this.cache.clear();
-    gl.viewport(0, 0, this.size, this.size);
-    gl.bindVertexArray(this.vao);
-    this.refreshVitality();
-    gl.bindVertexArray(null);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  }
-
-  /** Lit une texture d'état (RGBA par case), avec cache par tick. */
-  private read(index: number): Float32Array {
-    const c = this.cache.get(index);
-    if (c && c.tick === this.tick) return c.data;
-    const gl = this.gl;
-    const data = c?.data ?? new Float32Array(this.size * this.size * 4);
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.bufs[this.cur].fbo);
-    gl.readBuffer(gl.COLOR_ATTACHMENT0 + index);
-    gl.readPixels(0, 0, this.size, this.size, gl.RGBA, gl.FLOAT, data);
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
-    this.cache.set(index, { tick: this.tick, data });
-    return data;
-  }
-
-  /** Invalide le cache de lecture après une écriture hors tick. */
-  private touch(): void {
-    this.cache.clear();
+  private seed(): number {
+    return (this.rng.next() * 4294967296) >>> 0;
   }
 
   private stamp(mode: 0 | 1, x: number, y: number, radius: number, lineage: number, from: number, g: Genome): void {
-    const gl = this.gl;
-    const src = this.bufs[this.cur];
-    const dst = this.bufs[1 - this.cur];
-    const p = this.stampProg.use();
-    p.tex('uState', 0, src.tex[STATE]).tex('uGenome', 1, src.tex[GENOME]).tex('uAux', 2, src.tex[AUX]).tex('uSed', 3, src.tex[SED]);
-    p.i('uSize', this.size).i('uMode', mode).u('uSeed', this.rng.next() * 4294967296);
-    p.f('uCenter', x, y).f('uRadius', Math.max(1, radius)).f('uLineage', lineage).f('uFromLineage', from);
-    p.f('uGene', g.radius, g.mu, g.sigma, g.appetite).f('uHue', g.hue);
-    p.f('uDensity', SPORE_DENSITY).f('uNutrientBoost', SPORE_NUTRIENT_BOOST).f('uAliveT', ALIVE_THRESHOLD);
-    gl.viewport(0, 0, this.size, this.size);
-    gl.bindVertexArray(this.vao);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fbo);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-    this.cur = 1 - this.cur;
-    this.refreshVitality();
-    gl.bindVertexArray(null);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    this.touch();
+    this.backend.stamp({
+      mode, seed: this.seed(), x, y, radius, lineage, fromLineage: from,
+      gene: [g.radius, g.mu, g.sigma, g.appetite], hue: g.hue,
+      ...STAMP_DEFAULTS,
+    });
   }
 
   private registerLineage(parentId: number | null, origin: Lineage['origin'], mutation: MutationKind | null, g: Genome): Lineage {
@@ -470,7 +294,7 @@ export class Organisme {
 
   /** Génome de la case vivante la plus proche de (x, y), sur le tore. */
   private nearestLiving(x: number, y: number): { lineage: number; genome: Genome } | null {
-    const st = this.read(STATE);
+    const st = this.backend.read(STATE);
     const n = this.size;
     const cx = Math.floor(x);
     const cy = Math.floor(y);
@@ -493,8 +317,8 @@ export class Organisme {
   }
 
   private genomeAt(i: number): Genome {
-    const ge = this.read(GENOME);
-    const au = this.read(AUX);
+    const ge = this.backend.read(GENOME);
+    const au = this.backend.read(AUX);
     return { radius: ge[i * 4], mu: ge[i * 4 + 1], sigma: ge[i * 4 + 2], appetite: ge[i * 4 + 3], hue: au[i * 4] };
   }
 

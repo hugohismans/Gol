@@ -1,9 +1,9 @@
 // Rendu WebGL2 : calques séparés et rendu final composé.
 
 import { ALIVE_THRESHOLD, SEDIMENT_EARTH } from '../sim/config';
-import { Program, createFramebuffer, createFullscreenTriangle, createTexture } from '../sim/gl';
-import type { SimTextures } from '../sim/organisme';
-import { VERTEX_SHADER } from '../sim/shaders';
+import { Program, createFramebuffer, createFullscreenTriangle, createTexture } from '../sim/gpu/gl';
+import type { SimTextures } from '../sim/gpu/backend';
+import { VERTEX_SHADER } from '../sim/gpu/shaders';
 import { COMPOSITE_SHADER, PREP_SHADER } from './shaders';
 
 export type Layer = 'final' | 'vitalite' | 'lignees' | 'nutriments' | 'sediment';

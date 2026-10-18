@@ -5,6 +5,8 @@ import type { Params } from '../sim/config';
 import { dateOf, daylight } from '../sim/calendar';
 import type { SimDate } from '../sim/calendar';
 import { Organisme } from '../sim/organisme';
+import { GpuBackend } from '../sim/gpu/backend';
+import { GRID_SIZE } from '../sim/config';
 import type { MutationKind, SimStats } from '../sim/types';
 import { Renderer } from '../render/renderer';
 import type { Layer, View, ViewMode } from '../render/renderer';
@@ -48,6 +50,7 @@ export class Engine {
   private canvas!: HTMLCanvasElement;
   private gl!: WebGL2RenderingContext;
   private sim!: Organisme;
+  private gpu!: GpuBackend;
   private renderer!: Renderer;
   private raf = 0;
   private last = 0;
@@ -68,7 +71,8 @@ export class Engine {
     }
     this.gl = gl;
     try {
-      this.sim = new Organisme(gl);
+      this.gpu = new GpuBackend(gl, GRID_SIZE);
+      this.sim = new Organisme(this.gpu);
       this.renderer = new Renderer(gl, this.sim.size);
     } catch (e) {
       this.error = (e as Error).message;
@@ -124,7 +128,7 @@ export class Engine {
 
     const v = this.currentView();
     this.renderer.render(
-      this.sim.textures, this.canvas.width, this.canvas.height, v, this.layer,
+      this.gpu.textures, this.canvas.width, this.canvas.height, v, this.layer,
       (now - this.startTime) / 1000, daylight(this.sim.tick),
     );
 

@@ -135,6 +135,14 @@ export const GHOST_DECAY = 0.85;
 /** Influence minimale pour qu'une case morte porte encore une lignée fantôme. */
 export const GHOST_MIN_INFLUENCE = 0.03;
 
+// --- Couleur ---------------------------------------------------------------
+
+/** Luminosité OKLCH des teintes de lignée. */
+export const HUE_LIGHTNESS = 0.7;
+
+/** Chroma OKLCH des teintes de lignée (bas = sobre). */
+export const HUE_CHROMA = 0.085;
+
 // --- Sédiment ------------------------------------------------------------
 
 /** Couleur vers laquelle le sédiment s'assombrit (terre). */
@@ -164,6 +172,8 @@ export interface Params {
   consumption: number;
   /** Demi saturation : nutriments pour lesquels la croissance est à moitié. */
   nutrientHalf: number;
+  /** Demi saturation de la consommation : on ne mange pas ce qui n'est plus là. */
+  uptakeHalf: number;
   /** Déclin (unités Lenia) quand les nutriments sont épuisés. */
   starvation: number;
   /** Sous ce niveau de nutriments, la famine commence. */
@@ -198,6 +208,7 @@ export const DEFAULT_PARAMS: Params = {
   diffusion: 0.04,
   consumption: 0.012,
   nutrientHalf: 0.15,
+  uptakeHalf: 0.2,
   starvation: 0.25,
   starveBelow: 0.12,
   senescence: 0.15,
@@ -222,6 +233,7 @@ export const PARAM_RANGES: Record<keyof Params, { min: number; max: number; step
   diffusion: { min: 0, max: 0.24, step: 0.005, label: 'Diffusion des nutriments' },
   consumption: { min: 0, max: 0.05, step: 0.0005, label: 'Consommation' },
   nutrientHalf: { min: 0.01, max: 1, step: 0.01, label: 'Demi saturation nutriments' },
+  uptakeHalf: { min: 0, max: 1, step: 0.01, label: 'Demi saturation consommation' },
   starvation: { min: 0, max: 1.5, step: 0.01, label: 'Famine' },
   starveBelow: { min: 0, max: 0.5, step: 0.01, label: 'Seuil de famine' },
   senescence: { min: 0, max: 1, step: 0.01, label: 'Sénescence' },
