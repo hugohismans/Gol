@@ -9,6 +9,7 @@ import {
   DEFAULT_GENOME,
   DEFAULT_PARAMS,
   FERTILITY_DRIFT_DAYS,
+  FERTILITY_UPDATE_TICKS,
   SAVE_VERSION,
   SECONDS_PER_TICK,
   SEDIMENT_EARTH,
@@ -75,7 +76,7 @@ export class Organisme {
       this.backend.tick(
         q.regenRate * regenFactor(this.tick, q.dayAmplitude, q.seasonAmplitude),
         this.seed(),
-        this.tick / (FERTILITY_DRIFT_DAYS * TICKS_PER_DAY),
+        (Math.floor(this.tick / FERTILITY_UPDATE_TICKS) * FERTILITY_UPDATE_TICKS) / (FERTILITY_DRIFT_DAYS * TICKS_PER_DAY),
       );
       this.tick++;
       if (this.tick - this.lastCensusTick >= CENSUS_INTERVAL_TICKS) this.census();

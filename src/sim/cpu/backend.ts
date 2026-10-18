@@ -94,6 +94,8 @@ export class CpuBackend implements Backend {
   private c!: StepConstants;
   private rng = new CellRng();
   private col = [0, 0, 0];
+  private fert: Float32Array;
+  private fertKey = '';
 
   constructor(readonly size: number) {
     const n = size * size * 4;
@@ -101,6 +103,7 @@ export class CpuBackend implements Backend {
     this.next = [0, 1, 2, 3].map(() => new Float32Array(n));
     for (let s = size; s >= 1; s >>= 1) this.mips.push(new Float32Array(s * s));
     this.taps = buildKernelTaps();
+    this.fert = new Float32Array(size * size);
   }
 
   configure(c: StepConstants): void {
@@ -109,7 +112,7 @@ export class CpuBackend implements Backend {
 
   tick(regen: number, seed: number, terrainTime: number): void {
     this.buildMips();
-    const period = fertilityPeriod(this.size);
+    const fert = this.fertilityMap(terrainTime);
     const c = this.c;
     const n = this.size;
     const st = this.cur[STATE], ge = this.cur[GENOME], au = this.cur[AUX], se = this.cur[SED];
@@ -196,8 +199,7 @@ export class CpuBackend implements Backend {
         const ym = ((((py - 1 + n) % n) * n + px) * 4) + 1;
         const lap = st[xp] + st[xm] + st[yp] + st[ym] - 4 * nut;
         const consume = Math.min(nut, (nv * app * c.consumption * nut) / (nut + c.uptakeHalf + 1e-6));
-        const fert = c.fertility > 0 ? fertility((px + 0.5) / n, (py + 0.5) / n, period, terrainTime, c.fertility) : 1;
-        const nn = clamp(nut + c.diffusion * lap + regen * fert * (1 - nut) - consume, 0, 1);
+        const nn = clamp(nut + c.diffusion * lap + regen * fert[py * n + px] * (1 - nut) - consume, 0, 1);
 
         const nowAlive = nv >= c.aliveT && lin > 0.5;
         const nage = nowAlive ? (alive ? age + 1 : 0) : 0;
@@ -281,6 +283,21 @@ export class CpuBackend implements Backend {
   }
 
   dispose(): void {}
+
+  /** Carte de fertilité, recalculée seulement quand le temps ou le contraste change. */
+  private fertilityMap(t: number): Float32Array {
+    const key = t + ':' + this.c.fertility;
+    if (key === this.fertKey) return this.fert;
+    this.fertKey = key;
+    const n = this.size;
+    const period = fertilityPeriod(n);
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
+        this.fert[y * n + x] = this.c.fertility > 0 ? fertility((x + 0.5) / n, (y + 0.5) / n, period, t, this.c.fertility) : 1;
+      }
+    }
+    return this.fert;
+  }
 
   private swap(): void {
     const t = this.cur;

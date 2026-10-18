@@ -31,6 +31,8 @@ export class GpuBackend implements Backend {
   private stampProg: Program;
   private taps: Float32Array;
   private readBuf = new Map<number, Float32Array>();
+  /** Tampons de lecture réutilisés pour éviter d'allouer à chaque recensement. */
+  private spare: Float32Array[] = [];
 
   constructor(private gl: WebGL2RenderingContext, readonly size: number) {
     requireFloatTargets(gl);
@@ -112,7 +114,7 @@ export class GpuBackend implements Backend {
     const cached = this.readBuf.get(index);
     if (cached) return cached;
     const gl = this.gl;
-    const data = new Float32Array(this.size * this.size * 4);
+    const data = (this.spare[index] ??= new Float32Array(this.size * this.size * 4));
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.bufs[this.cur].fbo);
     gl.readBuffer(gl.COLOR_ATTACHMENT0 + index);
     gl.readPixels(0, 0, this.size, this.size, gl.RGBA, gl.FLOAT, data);

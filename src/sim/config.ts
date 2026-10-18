@@ -143,6 +143,9 @@ export const FERTILITY_SCALE = 64;
 /** Jours simulés pour que la carte de fertilité se renouvelle (dérive du climat). */
 export const FERTILITY_DRIFT_DAYS = 24;
 
+/** Pas (en ticks) de mise à jour de la carte de fertilité. */
+export const FERTILITY_UPDATE_TICKS = 60;
+
 // --- Couleur ---------------------------------------------------------------
 
 /** Luminosité OKLCH des teintes de lignée. */
@@ -218,23 +221,23 @@ export const DEFAULT_PARAMS: Params = {
   sigmaScale: 1,
   appetiteScale: 1,
   appetiteGrowth: 0.8,
-  regenRate: 0.0012,
-  initialNutrients: 1,
-  fertilityContrast: 0,
+  regenRate: 0.0006,
+  initialNutrients: 0.3,
+  fertilityContrast: 1,
   diffusion: 0.04,
   consumption: 0.012,
-  nutrientHalf: 0.15,
+  nutrientHalf: 0.4,
   uptakeHalf: 0.2,
   nutrientWidth: 0,
-  starvation: 0.25,
-  starveBelow: 0.12,
+  starvation: 0.3,
+  starveBelow: 0.3,
   senescence: 0.15,
   senescenceStartDays: 1,
   senescenceFullDays: 4,
   dayAmplitude: 0.5,
   seasonAmplitude: 0.35,
   mutationRate: 1,
-  sublineageRate: 2e-9,
+  sublineageRate: 2e-8,
   sedimentRate: 0.02,
   sedimentDarkening: 1e-6,
 };
