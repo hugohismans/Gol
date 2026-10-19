@@ -25,6 +25,12 @@
     text-align: center;
   }
 
+  @media (max-width: 600px) {
+    .narrator {
+      top: calc(190px + env(safe-area-inset-top));
+    }
+  }
+
   p {
     margin: 0;
     font-family: var(--serif);

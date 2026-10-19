@@ -526,7 +526,8 @@ export class Organisme {
 
   /** Instantané compact du monde pour le revoir plus tard. */
   snapshot(): Uint8Array {
-    return encodeFrame(this.tick, this.size, this.backend.read(STATE), this.backend.read(AUX), this.backend.read(SED), ALIVE_THRESHOLD);
+    const b = this.backend;
+    return encodeFrame(this.tick, this.size, b.read(STATE), b.read(AUX), b.read(SED), b.read(GENOME), ALIVE_THRESHOLD);
   }
 
   private meanSediment(): number {

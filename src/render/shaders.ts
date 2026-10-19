@@ -3,17 +3,27 @@
 
 import { COMMON_GLSL } from '../sim/gpu/shaders';
 
+/** Appétits entre lesquels la couleur d'une lignée passe de pâle à vive. */
+const APPETITE_COLOR_RANGE = [0.3, 0.85];
+/** Chroma relatif d'une lignée très sobre et d'une très gourmande. */
+const APPETITE_CHROMA = [0.35, 1.8];
+
 /** Nombre maximal de lignées mises en évidence ensemble (une lignée et ses descendantes). */
 export const MAX_FOCUS = 32;
 
 /** Prépare trois textures filtrables à partir des textures de simulation. */
 export const PREP_SHADER = /* glsl */ `#version 300 es
 #define MAX_FOCUS ${MAX_FOCUS}
+#define APPETITE_LOW ${APPETITE_COLOR_RANGE[0].toFixed(3)}
+#define APPETITE_HIGH ${APPETITE_COLOR_RANGE[1].toFixed(3)}
+#define APPETITE_PALE ${APPETITE_CHROMA[0].toFixed(3)}
+#define APPETITE_VIVID ${APPETITE_CHROMA[1].toFixed(3)}
 precision highp float;
 precision highp sampler2D;
 uniform sampler2D uState;
 uniform sampler2D uAux;
 uniform sampler2D uSed;
+uniform sampler2D uGenome;
 uniform float uAliveT;
 uniform float uSedRef;
 uniform float uSedMaturity;
@@ -30,7 +40,10 @@ void main() {
   vec4 a = texelFetch(uAux, p, 0);
   vec4 sed = texelFetch(uSed, p, 0);
   float v = s.z > 0.5 ? s.x : 0.0;
-  oLife = vec4(hueColor(a.x) * v, v);
+  // La teinte dit la lignée, la vivacité son appétit : gourmande vive, sobre pâle.
+  float app = texelFetch(uGenome, p, 0).w;
+  float chroma = HUE_C * mix(APPETITE_PALE, APPETITE_VIVID, smoothstep(APPETITE_LOW, APPETITE_HIGH, app));
+  oLife = vec4(oklch(HUE_L, chroma, a.x) * v, v);
   oGround = vec4(sed.rgb, smoothstep(0.15, 1.9, sed.a / uSedRef) * uSedMaturity);
   oField = vec4(s.y, a.z, s.x >= uAliveT ? 0.0 : a.y, fract(a.x));
   float f = 0.0;

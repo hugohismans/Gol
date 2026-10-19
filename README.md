@@ -19,6 +19,9 @@ Il faut un navigateur avec WebGL2 et `EXT_color_buffer_float` (tous les navigate
 ## Utilisation
 
 - Toucher le monde choisit l'endroit et prélève le génome vivant le plus proche. L'éprouvette s'ouvre : on y règle l'ADN (4 gènes, chaque pas vers la vigueur doit être payé par un pas vers la retenue, plus une teinte), on regarde la spore vivre seule un jour simulé, on la nomme, puis on la lâche.
+- Mode visiteur (par défaut) : le monde, l'objectif du jour, « revenir demain » (une journée passe, puis le récit de ce qui est arrivé à ta famille), « ma famille » et « registre ». Le bouton « atelier » ajoute les outils du prototype : vitesses, avance rapide, réglages. « ? » relance la visite guidée.
+- Huit visiteurs simulés (Léa, Malik, Inès, Tom, Sacha, Yuki, Noé, Awa) déposent chacun une spore par jour selon leur style ; certains se greffent sur ta famille. Désactivables dans les réglages.
+- Couleurs : la teinte identifie une lignée, la vivacité dit son appétit (gourmande vive, sobre pâle).
 - « registre » classe les familles (une spore et ses descendantes) : doyennes, étendues, prolifiques, avec le pseudo de qui les a déposées.
 - Vitesses : pause, x1 (60 ticks par seconde), x10, x100, x1000. Au delà de ce que le GPU peut suivre, la vitesse réelle s'affiche à côté.
 - « +1 jour » et « +1 mois » jouent le temps simulé aussi vite que possible (une barre de progression permet d'annuler).

@@ -51,6 +51,13 @@
     color: #e9dcc0;
   }
 
+  @media (max-width: 600px) {
+    .objective {
+      margin-top: 50px;
+      max-width: calc(100vw - 32px);
+    }
+  }
+
   .day {
     font-family: var(--serif);
     font-size: 1.15rem;

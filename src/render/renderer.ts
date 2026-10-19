@@ -28,6 +28,8 @@ export interface WorldTextures {
   state: WebGLTexture;
   aux: WebGLTexture;
   sediment: WebGLTexture;
+  /** Génome : seul l'appétit (w) sert au rendu. */
+  genome: WebGLTexture;
 }
 
 export interface RenderOptions {
@@ -111,7 +113,7 @@ export class Renderer {
 
     gl.viewport(0, 0, this.size, this.size);
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo);
-    this.prep.use().tex('uState', 0, t.state).tex('uAux', 1, t.aux).tex('uSed', 2, t.sediment);
+    this.prep.use().tex('uState', 0, t.state).tex('uAux', 1, t.aux).tex('uSed', 2, t.sediment).tex('uGenome', 3, t.genome);
     this.prep.f('uAliveT', ALIVE_THRESHOLD).f('uSedRef', Math.max(meanSediment, 1e-4));
     this.prep.f('uSedMaturity', 1 - Math.exp(-meanSediment / SEDIMENT_MATURITY));
     const ids = o.focus?.ids.slice(0, MAX_FOCUS) ?? [];
@@ -157,6 +159,7 @@ export class FrameTextures implements WorldTextures {
   state: WebGLTexture;
   aux: WebGLTexture;
   sediment: WebGLTexture;
+  genome: WebGLTexture;
   tick = -1;
   meanSediment = 0;
 
@@ -165,6 +168,7 @@ export class FrameTextures implements WorldTextures {
     this.state = createTexture(gl, size, size, opts);
     this.aux = createTexture(gl, size, size, opts);
     this.sediment = createTexture(gl, size, size, opts);
+    this.genome = createTexture(gl, size, size, opts);
   }
 
   load(f: Frame): void {
@@ -177,11 +181,12 @@ export class FrameTextures implements WorldTextures {
     put(this.state, f.state);
     put(this.aux, f.aux);
     put(this.sediment, f.sed);
+    put(this.genome, f.genome);
     this.tick = f.tick;
     this.meanSediment = f.meanSediment;
   }
 
   dispose(): void {
-    [this.state, this.aux, this.sediment].forEach((t) => this.gl.deleteTexture(t));
+    [this.state, this.aux, this.sediment, this.genome].forEach((t) => this.gl.deleteTexture(t));
   }
 }

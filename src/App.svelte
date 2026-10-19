@@ -170,6 +170,13 @@
   }
 
   @media (max-width: 600px) {
+    .tools.high {
+      top: calc(60px + env(safe-area-inset-top));
+      left: 16px;
+      right: auto;
+      justify-content: flex-start;
+    }
+
     .tools.raised {
       top: auto;
       bottom: calc(var(--sheet, 62vh) + 8px);

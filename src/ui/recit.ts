@@ -49,7 +49,8 @@ export function eventText(e: WorldEvent, sim: Organisme, pseudo: string, family:
       return `Une sous-lignée naît au cœur de ${name(e.other)}.`;
     case 'extinction': {
       const how = e.cause === 'conquete' ? `, conquise par ${name(e.other)}` : e.cause ? `, ${CAUSE_TEXT[e.cause]}` : '';
-      return `${cap(name(e.lineage))} s'éteint après ${e.n} jour${e.n > 1 ? 's' : ''}${how}.`;
+      const born = sim.lineages.get(e.lineage)?.bornTick ?? e.tick;
+      return `${cap(name(e.lineage))} s'éteint après ${formatDuration(e.tick - born)}${how}.`;
     }
     case 'conquete':
       return `${cap(name(e.lineage))} prend ${e.n} cases à ${name(e.other)}.`;

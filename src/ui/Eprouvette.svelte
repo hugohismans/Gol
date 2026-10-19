@@ -139,6 +139,8 @@
       {/if}
     </p>
 
+    <p class="sub legend">Dans le monde, plus une lignée est gourmande, plus sa couleur est vive ; les sobres sont pâles.</p>
+
     <label class="hue">
       <span class="sub">teinte</span>
       <input
@@ -300,6 +302,11 @@
 
   .balance.ok {
     color: var(--ink-dim);
+  }
+
+  .legend {
+    margin: 0;
+    font-style: italic;
   }
 
   .hue {
