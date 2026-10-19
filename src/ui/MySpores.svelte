@@ -8,11 +8,12 @@
 </script>
 
 {#if engine.panel === 'spores'}
-  <aside class="side-panel" aria-label="Mes spores">
+  <aside class="side-panel" aria-label="Ma famille">
     {#if engine.story}
-      <LineageStory {engine} back="toutes mes spores" />
+      <LineageStory {engine} back="toute ma famille" />
     {:else}
-      <h2>Mes spores</h2>
+      <h2>Ma famille</h2>
+      <p class="sub">Les spores que tu as déposées. Chacune fonde une famille : elle et toutes celles qui descendent d'elle.</p>
       <label class="pseudo">
         <span class="sub">ton pseudo</span>
         <input

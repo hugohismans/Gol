@@ -82,6 +82,13 @@
     </div>
   </header>
 
+  {#if engine.guide === 3}
+    <p class="guide-hint">
+      C'est ta spore, avant le départ. Tu peux régler son ADN (facultatif : chaque pas vers la droite se paie par un pas vers la
+      gauche), lui donner un nom, puis la lâcher.
+    </p>
+  {/if}
+
   <figure>
     <canvas bind:this={canvas}></canvas>
     <figcaption class="sub">
@@ -209,6 +216,14 @@
 
   figure {
     margin: 12px 0 0;
+  }
+
+  .guide-hint {
+    margin: 10px 0 0;
+    padding: 8px 10px;
+    border-left: 2px solid var(--accent);
+    font-family: var(--serif);
+    line-height: 1.4;
   }
 
   canvas {

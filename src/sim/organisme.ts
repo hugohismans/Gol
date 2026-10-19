@@ -8,7 +8,8 @@ import {
   ALIVE_THRESHOLD,
   CENSUS_INTERVAL_TICKS,
   CONQUEST_EVENT_CELLS,
-  FAMINE_EVENT_FRACTION,
+  FAMINE_EVENT_FACTOR,
+  FAMINE_REFERENCE_DAYS,
   JOURNAL_SIZE,
   LEDGER_DAYS,
   HISTORY_MAX_POINTS,
@@ -62,6 +63,8 @@ export class Organisme {
   private prevAge: Float32Array | null = null;
   /** Dernier jour simulé entièrement raconté. */
   private closedDay = 0;
+  /** Morts de faim par case vivante, des derniers jours (pour reconnaître une famine). */
+  private hunger: number[] = [];
 
   private rng: Rng;
   private nextLineageId = 1;
@@ -231,6 +234,7 @@ export class Organisme {
     this.prevLin = null;
     this.prevAge = null;
     this.closedDay = 0;
+    this.hunger = [];
     this.stats = this.emptyStats();
   }
 
@@ -470,9 +474,13 @@ export class Organisme {
         this.emit({ kind: 'conquete', lineage: l.id, other: Number(k), visitor: l.visitor, n: v, cause: null, x: l.history.at(-2) ?? 0, y: l.history.at(-1) ?? 0 });
       }
     }
-    if (starved > FAMINE_EVENT_FRACTION * Math.max(living, 1)) {
-      this.emit({ kind: 'famine', lineage: 0, other: null, visitor: null, n: starved, cause: 'faim', x: 0, y: 0 });
+    const ratio = starved / Math.max(living, 1);
+    const ref = this.hunger.length ? this.hunger.reduce((a, b) => a + b, 0) / this.hunger.length : 0;
+    if (this.hunger.length >= 3 && ratio > FAMINE_EVENT_FACTOR * ref) {
+      this.emit({ kind: 'famine', lineage: 0, other: null, visitor: null, n: Math.round(ratio / Math.max(ref, 1e-6) * 10) / 10, cause: 'faim', x: 0, y: 0 });
     }
+    this.hunger.push(ratio);
+    if (this.hunger.length > FAMINE_REFERENCE_DAYS) this.hunger.shift();
     const end = (day + 1) * TICKS_PER_DAY;
     for (const l of this.lineages.values()) {
       if (l.origin !== 'spore' || !l.visitor) continue;

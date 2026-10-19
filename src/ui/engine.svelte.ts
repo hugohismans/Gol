@@ -15,6 +15,10 @@ import { clearWorld, loadPrefs, loadWorld, savePrefs, saveWorld } from '../persi
 import { clearFrames, getFrame, listTicks, pruneFrames, putFrame, useWorldSize } from '../history';
 import { decodeFrame } from '../sim/frame';
 import { lineageStory, mySpores, placeAt, registry } from './story';
+import { buildRecap, concernsFamily, eventText, myFamily, objective } from './recit';
+import type { Recap } from './recit';
+import { SimulatedVisitors } from '../sim/visitors';
+import type { WorldEvent } from '../sim/types';
 import type { RegistryRow, RegistryTab, SporeCard, Story } from './story';
 
 /**
@@ -28,6 +32,26 @@ const CALIBRATE_MIN_TICKS = 4;
 const CALIBRATE_SMOOTHING = 0.3;
 /** Plafond d'un pas de temps réel (onglet en arrière plan, à-coups). */
 const MAX_FRAME_DT = 0.25;
+/** Durée d'affichage d'une phrase du narrateur, et écart minimal entre deux phrases sur le monde (ms). */
+const CAPTION_MS = 7000;
+const WORLD_CAPTION_GAP_MS = 6000;
+/** Phrases du narrateur affichées ensemble au plus. */
+const MAX_CAPTIONS = 3;
+/** Au delà de cette vitesse, le narrateur se tait (trop d'événements pour être lus). */
+const NARRATOR_MAX_SPEED = 10;
+/** Heures de la tombée de la nuit et de l'aube racontées. */
+const DUSK_HOUR = 20;
+const DAWN_HOUR = 6;
+
+export interface Caption {
+  id: number;
+  text: string;
+  family: boolean;
+  until: number;
+}
+
+/** Étapes de la première visite guidée (0 : terminée). */
+export type GuideStep = 0 | 1 | 2 | 3 | 4 | 5;
 const AUTOSAVE_MS = 20000;
 const UI_REFRESH_MS = 200;
 /** Le rendu est doux : au delà, la résolution coûte sans se voir. */
@@ -65,6 +89,9 @@ interface Prefs {
   dna: Dna;
   name: string;
   eprouvette: boolean;
+  atelier: boolean;
+  visiteurs: boolean;
+  guided: boolean;
 }
 
 export class Engine {
@@ -81,6 +108,15 @@ export class Engine {
   eprouvette = $state(true);
   pending = $state<PendingSpore | null>(null);
   registryTab = $state<RegistryTab>('doyennes');
+  /** Mode atelier : outils du prototype (vitesses, avance rapide, réglages). Sinon, mode visiteur. */
+  atelier = $state(false);
+  /** Visiteurs simulés actifs. */
+  visiteurs = $state(true);
+  guided = $state(false);
+  guide = $state<GuideStep>(0);
+  captions = $state<Caption[]>([]);
+  objectiveText = $state('');
+  recap = $state<Recap | null>(null);
   registry = $state<RegistryRow[]>([]);
   params = $state<Params>({ ...DEFAULT_PARAMS });
   stats = $state<SimStats | null>(null);
@@ -121,6 +157,11 @@ export class Engine {
   private loadingFrame = false;
   private lastReplayStep = 0;
   private locateUntil = 0;
+  private bots!: SimulatedVisitors;
+  private recapFrom: number | null = null;
+  private lastWorldCaption = 0;
+  private captionId = 0;
+  private lastHour = -1;
 
   async start(canvas: HTMLCanvasElement): Promise<void> {
     this.canvas = canvas;
@@ -158,6 +199,12 @@ export class Engine {
     }
     this.params = { ...this.sim.params };
     this.sim.onSnapshot = (tick, frame) => putFrame(tick, frame);
+    this.bots = new SimulatedVisitors(this.sim, (Math.random() * 2 ** 32) >>> 0, () => this.pseudo);
+    this.sim.onTick = (t) => {
+      if (this.visiteurs) this.bots.tick(t);
+    };
+    this.sim.onEvent = (e) => this.narrate(e);
+    if (!this.guided) this.guide = 1;
     void pruneFrames(this.sim.tick).catch(() => {});
     this.sim.census();
     this.refreshUi();
@@ -190,8 +237,9 @@ export class Engine {
       ran = k;
       const left = this.fastForward.left - k;
       this.fastForward = left > 0 ? { left, total: this.fastForward.total } : null;
-    } else if (this.speed > 0) {
-      const wanted = this.speed * TICKS_PER_SECOND_X1 * realDt;
+      if (!this.fastForward && this.recapFrom !== null) this.showRecap();
+    } else if (this.runSpeed > 0) {
+      const wanted = this.runSpeed * TICKS_PER_SECOND_X1 * realDt;
       const capped = Math.min(wanted, allowed);
       // step() garde le reliquat fractionnaire d'une image à l'autre.
       const before = this.sim.tick;
@@ -247,10 +295,101 @@ export class Engine {
     this.perf = { msPerTick: this.msPerTick, maxSpeed: (SIM_TIME_SHARE * 1000) / this.msPerTick / TICKS_PER_SECOND_X1 };
   }
 
+  /** Vitesse effective : le mode visiteur vit toujours à x1. */
+  get runSpeed(): number {
+    return this.atelier ? this.speed : 1;
+  }
+
+  // --- Narrateur et récit ---------------------------------------------------
+
+  private narrate(e: WorldEvent): void {
+    if (this.fastForward || this.runSpeed > NARRATOR_MAX_SPEED || this.replay) return;
+    const family = myFamily(this.sim, this.pseudo);
+    const mine = concernsFamily(e, family);
+    const now = performance.now();
+    if (!mine) {
+      if (e.kind === 'sous-lignee' || now - this.lastWorldCaption < WORLD_CAPTION_GAP_MS) return;
+      this.lastWorldCaption = now;
+    }
+    this.say(eventText(e, this.sim, this.pseudo, family), mine);
+    if (e.kind !== 'famine') this.renderer.markSpore(e.x, e.y, (now - this.startTime) / 1000);
+  }
+
+  private say(text: string, family: boolean): void {
+    const c: Caption = { id: ++this.captionId, text, family, until: performance.now() + CAPTION_MS };
+    this.captions = [...this.captions, c].slice(-MAX_CAPTIONS);
+  }
+
+  /** Raconte la tombée de la nuit et l'aube, qui changent la vie du sol. */
+  private narrateDaylight(): void {
+    const h = this.date.hour;
+    if (this.lastHour >= 0 && h !== this.lastHour && !this.fastForward && !this.replay && this.runSpeed <= NARRATOR_MAX_SPEED) {
+      if (this.lastHour < DUSK_HOUR && h >= DUSK_HOUR) this.say('La nuit tombe : le sol se régénère moins vite.', false);
+      if (this.lastHour < DAWN_HOUR && h >= DAWN_HOUR) this.say('L’aube : le sol reprend des forces.', false);
+    }
+    this.lastHour = h;
+  }
+
+  /** Avance d'un jour, puis raconte ce qui s'est passé pendant l'absence. */
+  visitTomorrow(): void {
+    if (this.pending || this.replay || this.fastForward) return;
+    this.recapFrom = this.sim.tick;
+    this.captions = [];
+    this.advanceDays(1);
+  }
+
+  private showRecap(): void {
+    const from = this.recapFrom!;
+    this.recapFrom = null;
+    this.sim.census();
+    this.recap = buildRecap(this.sim, from, this.sim.tick, this.pseudo);
+    if (this.guide === 4) this.guide = 5;
+    this.refreshUi();
+  }
+
+  closeRecap(): void {
+    this.recap = null;
+  }
+
+  /** Revoit en accéléré les 24 heures racontées. */
+  async replayRecap(): Promise<void> {
+    if (!this.recap) return;
+    const from = this.recap.from;
+    this.recap = null;
+    await this.seek(from);
+    if (this.replay) this.replay.playing = true;
+  }
+
+  // --- Visite guidée -----------------------------------------------------------
+
+  nextGuide(): void {
+    if (this.guide === 1) this.guide = 2;
+    else if (this.guide === 4 || this.guide === 5) this.endGuide();
+  }
+
+  endGuide(): void {
+    this.guide = 0;
+    this.guided = true;
+    this.persistPrefs();
+  }
+
+  restartGuide(): void {
+    this.guided = false;
+    this.guide = 1;
+  }
+
+  setAtelier(on: boolean): void {
+    this.atelier = on;
+    if (!on && this.panel === 'reglages') this.panel = null;
+    this.persistPrefs();
+  }
+
   /** Mise en évidence de la lignée choisie et anneau sur son lieu, au tick affiché. */
   private highlight(tick: number, now: number): Pick<RenderOptions, 'focus' | 'marker'> {
     if (this.pending) return { marker: { x: this.pending.x, y: this.pending.y, strength: 1 } };
-    if (this.selected === null || !this.story) return {};
+    // On ne met une lignée en lumière que lorsqu'on lit son histoire.
+    const reading = this.replay || this.panel === 'spores' || this.panel === 'registre';
+    if (!reading || this.selected === null || !this.story) return {};
     const l = this.sim.lineages.get(this.selected);
     if (!l) return {};
     const place = placeAt(l, tick);
@@ -269,6 +408,10 @@ export class Engine {
     this.spores = mySpores(this.sim, this.pseudo);
     this.story = this.selected !== null ? lineageStory(this.sim, this.selected, this.pseudo) : null;
     if (this.panel === 'registre') this.registry = registry(this.sim, this.registryTab, this.pseudo);
+    this.objectiveText = objective(this.sim, this.pseudo);
+    const now = performance.now();
+    if (this.captions.some((c) => c.until < now)) this.captions = this.captions.filter((c) => c.until >= now);
+    this.narrateDaylight();
     const w = this.tickWindow;
     if (w.length > 1) {
       const span = (w[w.length - 1].t - w[0].t) / 1000;
@@ -302,6 +445,7 @@ export class Engine {
     // Le génome est prélevé là où l'on touche : c'est celui dont la spore hérite.
     const base = this.sim.inheritedGenome(p.x, p.y);
     this.pending = { x: p.x, y: p.y, parentId: base.lineage, base: base.genome };
+    if (this.guide === 2) this.guide = 3;
     if (!this.eprouvette && isValidDna(this.dna) && this.pseudo) this.release();
   }
 
@@ -331,6 +475,7 @@ export class Engine {
     putFrame(this.sim.tick, this.sim.snapshot());
     this.persistPrefs();
     this.selected = l.id;
+    if (this.guide === 3) this.guide = 4;
     this.refreshUi();
   }
 
@@ -459,6 +604,8 @@ export class Engine {
     this.fastForward = null;
     this.exitReplay();
     this.selected = null;
+    this.recap = null;
+    this.captions = [];
     this.sim.reset();
     clearWorld();
     void clearFrames();
@@ -473,7 +620,8 @@ export class Engine {
 
   persistPrefs(): void {
     const prefs: Prefs = {
-      speed: this.speed, layer: this.layer, view: this.view, pseudo: this.pseudo, dna: this.dna, name: this.name, eprouvette: this.eprouvette,
+      speed: this.speed, layer: this.layer, view: this.view, pseudo: this.pseudo, dna: this.dna, name: this.name,
+      eprouvette: this.eprouvette, atelier: this.atelier, visiteurs: this.visiteurs, guided: this.guided,
     };
     savePrefs(prefs);
   }

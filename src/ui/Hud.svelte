@@ -14,12 +14,15 @@
   <div class="date">
     <div class="day">{engine.date.dayOfMonth} {engine.date.month}, an {engine.date.year}</div>
     <div class="sub">{pad(engine.date.hour)}:{pad(engine.date.minute)} · {engine.date.season}</div>
+    {#if engine.objectiveText && !engine.replay && engine.panel === null && !engine.pending}<p class="objective">{engine.objectiveText}</p>{/if}
   </div>
+  {#if engine.atelier}
   <dl class="stats">
     <div><dt>lignées vivantes</dt><dd>{engine.stats?.livingLineages ?? 0}</dd></div>
     <div><dt>surface vivante</dt><dd>{fmt.format(surface)} %</dd></div>
     <div><dt>âge du monde</dt><dd>{age < 1 ? `${fmt.format(age * 24)} h` : `${fmt.format(age)} j`}</dd></div>
   </dl>
+  {/if}
 </header>
 
 <style>
@@ -36,6 +39,16 @@
     pointer-events: none;
     z-index: 3;
     text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8);
+  }
+
+  .objective {
+    margin: 8px 0 0;
+    max-width: min(420px, 62vw);
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 0.88rem;
+    line-height: 1.35;
+    color: #e9dcc0;
   }
 
   .day {

@@ -106,6 +106,17 @@
         />
         passer par l'éprouvette avant chaque dépôt (sinon : dépôt direct avec le dernier ADN)
       </label>
+      <label class="check">
+        <input
+          type="checkbox"
+          checked={engine.visiteurs}
+          onchange={(e) => {
+            engine.visiteurs = (e.currentTarget as HTMLInputElement).checked;
+            engine.persistPrefs();
+          }}
+        />
+        visiteurs simulés (Léa, Malik, Inès, Tom, Sacha, Yuki, Noé, Awa : une spore par jour chacun, selon leur style)
+      </label>
       {#if engine.stats}
         <p class="info">
           biomasse {engine.stats.biomass.toFixed(0)} · nutriments moyens {engine.stats.meanNutrients.toFixed(2)} · lignées

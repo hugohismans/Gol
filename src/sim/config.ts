@@ -310,8 +310,14 @@ export const JOURNAL_SIZE = 400;
 /** Cases prises en un jour à partir desquelles une conquête est racontée. */
 export const CONQUEST_EVENT_CELLS = 120;
 
-/** Part des cases vivantes mortes de faim en un jour à partir de laquelle on parle de famine. */
-export const FAMINE_EVENT_FRACTION = 0.25;
+/**
+ * Une journée est une famine quand la faim y tue ce multiple de la moyenne des
+ * jours précédents (le renouvellement des cases fait mourir de faim tous les jours).
+ */
+export const FAMINE_EVENT_FACTOR = 1.8;
+
+/** Jours de référence pour juger qu'une famine est exceptionnelle. */
+export const FAMINE_REFERENCE_DAYS = 5;
 
 /** Âges (en jours) d'une famille qui méritent d'être signalés. */
 export const AGE_MILESTONES_DAYS = [1, 3, 7, 14, 30, 60, 100, 365];

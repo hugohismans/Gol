@@ -3,6 +3,7 @@
   import StoryChart from './StoryChart.svelte';
   import { MUTATION_LABELS, dnaSummary, formatDate, isMine } from './story';
   import { status, family } from './cards';
+  import { familyTree } from './recit';
 
   let { engine, back }: { engine: Engine; back: string } = $props();
 </script>
@@ -38,6 +39,22 @@
   </div>
 
   <StoryChart story={s} cursor={engine.replay ? engine.shownTick : null} onseek={(t) => engine.seek(t)} />
+
+  {@const tree = familyTree(engine.organisme, s.card.id, engine.pseudo)}
+  {#if tree.length > 1}
+    <h3>Sa descendance</h3>
+    <ul class="tree">
+      {#each tree as n (n.id)}
+        <li style:padding-left="{n.depth * 14}px">
+          <button class="node" class:dead={!n.alive} onclick={() => engine.select(n.id)}>
+            <i class="dot small" style:background={n.color} class:dead={!n.alive}></i>
+            <span>{n.label}</span>
+            <span class="sub">{n.who}{n.alive ? ` · ${n.area} cases` : ' · éteinte'}</span>
+          </button>
+        </li>
+      {/each}
+    </ul>
+  {/if}
 
   <h3>Ce qui s'est passé</h3>
   <ol class="events">
@@ -91,6 +108,32 @@
   .back {
     font-size: 0.72rem;
     padding: 0.3em 0.7em;
+  }
+
+  .tree {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 2px;
+  }
+
+  .node {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border: 0;
+    padding: 2px 0;
+    text-align: left;
+  }
+
+  .node.dead span:first-of-type {
+    color: var(--ink-dim);
+  }
+
+  .dot.small {
+    width: 9px;
+    height: 9px;
   }
 
   .events {

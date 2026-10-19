@@ -8,12 +8,15 @@
   import Registre from './ui/Registre.svelte';
   import EprouvettePanel from './ui/Eprouvette.svelte';
   import ReplayBar from './ui/ReplayBar.svelte';
+  import Narrator from './ui/Narrator.svelte';
+  import Recap from './ui/Recap.svelte';
+  import Guide from './ui/Guide.svelte';
 
   const engine = new Engine();
   let canvas: HTMLCanvasElement;
   let down: { x: number; y: number; t: number } | null = null;
 
-  // Hauteur du panneau « mes spores » sur mobile : plus bas pendant la relecture pour laisser voir le monde.
+  // Hauteur du panneau « ma famille » sur mobile : plus bas pendant la relecture pour laisser voir le monde.
   $effect(() => {
     document.documentElement.style.setProperty('--sheet', engine.replay ? '40vh' : '62vh');
   });
@@ -55,23 +58,36 @@
     {#if engine.replay}
       <ReplayBar {engine} />
     {:else if !engine.pending}
-      <TimeBar {engine} />
+      {#if engine.atelier}
+        <TimeBar {engine} />
+      {:else if engine.fastForward}
+        <div class="hint">une journée passe…</div>
+      {:else}
+        <button class="tomorrow" onclick={() => engine.visitTomorrow()}>revenir demain</button>
+      {/if}
       <div class="hint">toucher le monde pour préparer une spore</div>
     {/if}
   </div>
+  <Narrator {engine} />
   <Registre {engine} />
   <MySpores {engine} />
   <DebugPanel {engine} />
   {#if engine.pending}
     <EprouvettePanel {engine} />
   {/if}
-  <div class="tools" class:raised={engine.panel !== null}>
-    <button class:on={engine.panel === 'registre'} onclick={() => engine.openPanel('registre')} aria-expanded={engine.panel === 'registre'}>registre</button>
+  <div class="tools" class:raised={engine.panel !== null} class:high={!engine.atelier}>
     <button class:on={engine.panel === 'spores'} onclick={() => engine.openPanel('spores')} aria-expanded={engine.panel === 'spores'}>
-      mes spores{engine.spores.length ? ` · ${engine.spores.length}` : ''}
+      ma famille{engine.spores.length ? ` · ${engine.spores.length}` : ''}
     </button>
-    <button class:on={engine.panel === 'reglages'} onclick={() => engine.openPanel('reglages')} aria-expanded={engine.panel === 'reglages'}>réglages</button>
+    <button class:on={engine.panel === 'registre'} onclick={() => engine.openPanel('registre')} aria-expanded={engine.panel === 'registre'}>registre</button>
+    {#if engine.atelier}
+      <button class:on={engine.panel === 'reglages'} onclick={() => engine.openPanel('reglages')} aria-expanded={engine.panel === 'reglages'}>réglages</button>
+    {/if}
+    <button class="quiet" class:on={engine.atelier} onclick={() => engine.setAtelier(!engine.atelier)} title="outils du prototype : vitesses, avance rapide, réglages">atelier</button>
+    <button class="quiet" onclick={() => engine.restartGuide()} aria-label="revoir la visite guidée">?</button>
   </div>
+  <Guide {engine} />
+  <Recap {engine} />
 {/if}
 
 <style>
@@ -122,7 +138,28 @@
     top: calc(76px + env(safe-area-inset-top));
     right: 16px;
     display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
     gap: 6px;
+    max-width: calc(100vw - 32px);
+  }
+
+  .tools.high {
+    top: calc(12px + env(safe-area-inset-top));
+  }
+
+  .tools .quiet {
+    color: var(--ink-dim);
+  }
+
+  .tomorrow {
+    font-family: var(--serif);
+    font-size: 1rem;
+    padding: 0.55em 1.4em;
+    background: rgba(201, 180, 138, 0.2);
+    border-color: rgba(201, 180, 138, 0.55);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
   }
 
   .tools button {
