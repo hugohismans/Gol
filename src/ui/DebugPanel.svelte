@@ -113,6 +113,11 @@
         </p>
       {/if}
       {#if engine.saveInfo}<p class="info">{engine.saveInfo}</p>{/if}
+      {#if engine.perf.msPerTick > 0}
+        <p class="info">
+          un tick coûte {engine.perf.msPerTick.toFixed(2)} ms sur cet appareil : vitesse maximale environ x{Math.round(engine.perf.maxSpeed)}
+        </p>
+      {/if}
     </section>
 
     <section>

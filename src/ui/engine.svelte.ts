@@ -17,11 +17,17 @@ import { decodeFrame } from '../sim/frame';
 import { lineageStory, mySpores, placeAt, registry } from './story';
 import type { RegistryRow, RegistryTab, SporeCard, Story } from './story';
 
-/** Bornes du nombre de ticks joués par image, ajusté selon la fluidité. */
-const MIN_TICKS_PER_FRAME = 1;
-const MAX_TICKS_PER_FRAME = 4000;
-/** Durée d'image visée (ms) avant de réduire le travail par image. */
-const FRAME_BUDGET_MS = 22;
+/**
+ * Part du temps réel que la simulation peut occuper aux grandes vitesses ;
+ * le reste va à l'affichage et à l'interface.
+ */
+const SIM_TIME_SHARE = 0.75;
+/** Mesure du coût d'un tick : intervalle, taille minimale du paquet chronométré, lissage. */
+const CALIBRATE_EVERY_MS = 1500;
+const CALIBRATE_MIN_TICKS = 4;
+const CALIBRATE_SMOOTHING = 0.3;
+/** Plafond d'un pas de temps réel (onglet en arrière plan, à-coups). */
+const MAX_FRAME_DT = 0.25;
 const AUTOSAVE_MS = 20000;
 const UI_REFRESH_MS = 200;
 /** Le rendu est doux : au delà, la résolution coûte sans se voir. */
@@ -102,7 +108,11 @@ export class Engine {
   private renderer!: Renderer;
   private raf = 0;
   private last = 0;
-  private ticksPerFrame = 8;
+  /** Coût mesuré d'un tick en ms (GPU compris), et date de la dernière mesure. */
+  private msPerTick = 1;
+  private lastCalibration = 0;
+  /** Coût d'un tick et vitesse maximale atteignable, pour les réglages. */
+  perf = $state({ msPerTick: 0, maxSpeed: 0 });
   private lastUi = 0;
   private lastSave = 0;
   private tickWindow: { t: number; ticks: number }[] = [];
@@ -166,24 +176,28 @@ export class Engine {
 
   private frame = (now: number): void => {
     this.raf = requestAnimationFrame(this.frame);
-    const frameMs = now - this.last;
-    const realDt = Math.min(0.1, frameMs / 1000);
+    const realDt = Math.min(MAX_FRAME_DT, (now - this.last) / 1000);
     this.last = now;
-    this.adaptBudget(frameMs);
+    // Ticks que la simulation peut jouer dans cette image sans dépasser sa part du temps.
+    const allowed = ((SIM_TIME_SHARE * 1000) / this.msPerTick) * realDt;
 
     let ran = 0;
     if (this.replay) {
       this.stepReplay(now);
     } else if (this.fastForward) {
-      const k = Math.min(this.fastForward.left, Math.round(this.ticksPerFrame));
-      this.sim.runTicks(k);
+      const k = Math.max(1, Math.min(this.fastForward.left, Math.floor(allowed)));
+      this.runMeasured(k, now);
       ran = k;
       const left = this.fastForward.left - k;
       this.fastForward = left > 0 ? { left, total: this.fastForward.total } : null;
     } else if (this.speed > 0) {
       const wanted = this.speed * TICKS_PER_SECOND_X1 * realDt;
-      const capped = Math.min(wanted, this.ticksPerFrame);
-      ran = this.sim.step(capped * SECONDS_PER_TICK);
+      const capped = Math.min(wanted, allowed);
+      // step() garde le reliquat fractionnaire d'une image à l'autre.
+      const before = this.sim.tick;
+      if (capped >= CALIBRATE_MIN_TICKS) this.runMeasured(Math.floor(capped), now);
+      else this.sim.step(capped * SECONDS_PER_TICK);
+      ran = this.sim.tick - before;
     }
     this.tickWindow.push({ t: now, ticks: ran });
     while (this.tickWindow.length > 1 && now - this.tickWindow[0].t > 1000) this.tickWindow.shift();
@@ -212,12 +226,25 @@ export class Engine {
     }
   };
 
-  /** Ajuste le nombre de ticks par image pour rester fluide. */
-  private adaptBudget(frameMs: number): void {
-    const busy = this.fastForward !== null || this.speed * TICKS_PER_SECOND_X1 / 60 >= this.ticksPerFrame * 0.9;
-    if (frameMs > FRAME_BUDGET_MS * 1.6) this.ticksPerFrame *= 0.8;
-    else if (frameMs < FRAME_BUDGET_MS && busy) this.ticksPerFrame *= 1.1;
-    this.ticksPerFrame = Math.min(MAX_TICKS_PER_FRAME, Math.max(MIN_TICKS_PER_FRAME, this.ticksPerFrame));
+  /**
+   * Joue n ticks et, de temps en temps, chronomètre le paquet en attendant que
+   * le GPU l'ait réellement fini : c'est ce coût, et non la durée de l'image
+   * (souvent dominée par l'affichage), qui fixe la vitesse atteignable.
+   */
+  private runMeasured(n: number, now: number): void {
+    const measure = n >= CALIBRATE_MIN_TICKS && now - this.lastCalibration > CALIBRATE_EVERY_MS;
+    if (!measure) {
+      this.sim.runTicks(n);
+      return;
+    }
+    this.lastCalibration = now;
+    this.gpu.sync();
+    const t0 = performance.now();
+    this.sim.runTicks(n);
+    this.gpu.sync();
+    const ms = Math.max(0.01, (performance.now() - t0) / n);
+    this.msPerTick += (ms - this.msPerTick) * CALIBRATE_SMOOTHING;
+    this.perf = { msPerTick: this.msPerTick, maxSpeed: (SIM_TIME_SHARE * 1000) / this.msPerTick / TICKS_PER_SECOND_X1 };
   }
 
   /** Mise en évidence de la lignée choisie et anneau sur son lieu, au tick affiché. */
@@ -412,7 +439,6 @@ export class Engine {
   advanceDays(days: number): void {
     const total = Math.round(days * TICKS_PER_DAY);
     this.fastForward = { left: total, total };
-    this.ticksPerFrame = Math.max(this.ticksPerFrame, 32);
   }
 
   cancelFastForward(): void {
