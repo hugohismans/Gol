@@ -3,7 +3,7 @@
 // exprimée en unités de temps Lenia (multipliée par LENIA_DT à chaque tick),
 // les nutriments et le sédiment sont exprimés par tick.
 
-import type { DnaGene, Genome, MutationKind } from './types';
+import type { Dna, DnaGene, Genome, MutationKind, VisitorStyle } from './types';
 
 // --- Monde ---------------------------------------------------------------
 
@@ -315,6 +315,37 @@ export const FAMINE_EVENT_FRACTION = 0.25;
 
 /** Âges (en jours) d'une famille qui méritent d'être signalés. */
 export const AGE_MILESTONES_DAYS = [1, 3, 7, 14, 30, 60, 100, 365];
+
+// --- Visiteurs simulés (prototype) ------------------------------------------
+
+/** Faux visiteurs pour éprouver un monde partagé avant le serveur. Assiduité : probabilité de venir chaque jour. */
+export const SIMULATED_VISITORS: { pseudo: string; style: VisitorStyle; assiduity: number }[] = [
+  { pseudo: 'Léa', style: 'fidele', assiduity: 0.9 },
+  { pseudo: 'Malik', style: 'suiveur', assiduity: 0.7 },
+  { pseudo: 'Inès', style: 'exploratrice', assiduity: 0.6 },
+  { pseudo: 'Tom', style: 'gourmand', assiduity: 0.8 },
+  { pseudo: 'Sacha', style: 'prudente', assiduity: 0.6 },
+  { pseudo: 'Yuki', style: 'voisine', assiduity: 0.7 },
+  { pseudo: 'Noé', style: 'fidele', assiduity: 0.5 },
+  { pseudo: 'Awa', style: 'suiveur', assiduity: 0.5 },
+];
+
+/** ADN typique des styles marqués (les autres font de petites retouches au hasard). */
+export const STYLE_DNA: Partial<Record<VisitorStyle, Dna>> = {
+  gourmand: { appetit: 2, envergure: 1, tolerance: 0, audace: -3, teinte: 0 },
+  prudente: { appetit: -2, envergure: 0, tolerance: 2, audace: 0, teinte: 0 },
+  exploratrice: { appetit: -1, envergure: 2, tolerance: 0, audace: -1, teinte: 0 },
+};
+
+/** Probabilité qu'un visiteur simulé nomme sa lignée, et noms possibles. */
+export const NAMING_PROBABILITY = 0.6;
+export const LINEAGE_NAMES = [
+  'Mousse', 'Brume', 'Ocre', 'Fougère', 'Sel', 'Ambre', 'Lichen', 'Rosée', 'Cendre', 'Givre', 'Tourbe', 'Aube',
+  'Racine', 'Lierre', 'Écume', 'Silex', 'Nacre', 'Velours', 'Argile', 'Saule',
+];
+
+/** Cases tirées au hasard pour trouver un sol vide et fertile. */
+export const EXPLORER_SAMPLES = 400;
 
 // --- Persistance ---------------------------------------------------------
 

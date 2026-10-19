@@ -37,3 +37,20 @@ describe('récit du monde', () => {
     expect(other.lineages.get(1)!.ledger).toEqual(sim.lineages.get(1)!.ledger);
   });
 });
+
+describe('visiteurs simulés', () => {
+  it('passent chaque jour et se greffent sur des familles', async () => {
+    const { SimulatedVisitors } = await import('../src/sim/visitors');
+    const sim = new Organisme(new CpuBackend(64), { seed: 8 });
+    const me = sim.spawnSpore(32, 32, null, 'Hugo');
+    const bots = new SimulatedVisitors(sim, 5, () => 'Hugo');
+    sim.onTick = (t) => bots.tick(t);
+    sim.runTicks(TICKS_PER_DAY);
+    const deposits = sim.events.filter((e) => e.kind === 'depot' && e.visitor !== 'Hugo');
+    expect(deposits.length).toBeGreaterThan(2);
+    // Yuki se greffe sur la famille du joueur si elle vit encore.
+    const yuki = [...sim.lineages.values()].filter((l) => l.visitor === 'Yuki');
+    for (const y of yuki) expect(y.parentId).not.toBeNull();
+    expect(sim.descendants(me.id).length).toBeGreaterThanOrEqual(1);
+  });
+});

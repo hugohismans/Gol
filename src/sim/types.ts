@@ -36,6 +36,13 @@ export interface Dna {
 
 export type LineageOrigin = 'spore' | 'sous-lignee';
 
+/**
+ * Style d'un visiteur simulé (prototype) : fidèle à sa propre famille,
+ * suiveur de la famille doyenne, voisin de la famille du joueur, explorateur
+ * des sols vides, gourmand, prudent.
+ */
+export type VisitorStyle = 'fidele' | 'suiveur' | 'voisine' | 'exploratrice' | 'gourmand' | 'prudente';
+
 /** Pourquoi une case vivante meurt : faim, grand âge, ou repli (la dynamique elle même). */
 export type DeathCause = 'faim' | 'vieillesse' | 'repli';
 
