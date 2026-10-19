@@ -4,8 +4,13 @@
 // le calcul des champs est délégué à un Backend (GPU ou CPU). Aucun accès au DOM.
 
 import {
+  AGE_MILESTONES_DAYS,
   ALIVE_THRESHOLD,
   CENSUS_INTERVAL_TICKS,
+  CONQUEST_EVENT_CELLS,
+  FAMINE_EVENT_FRACTION,
+  JOURNAL_SIZE,
+  LEDGER_DAYS,
   HISTORY_MAX_POINTS,
   SNAPSHOT_INTERVAL_TICKS,
   DEFAULT_GENOME,
@@ -29,7 +34,7 @@ import { applyDna, applyMutation, clampGenome, randomGenome, sublineageJump } fr
 import { Rng } from './rng';
 import { decodeSave, encodeSave } from './serialize';
 import { encodeFrame } from './frame';
-import type { Dna, Genome, Lineage, MutationKind, SimState, SimStats } from './types';
+import type { DeathCause, Dna, Genome, LedgerDay, Lineage, MutationKind, SimState, SimStats, WorldEvent } from './types';
 
 export interface OrganismeOptions {
   seed?: number;
@@ -45,6 +50,18 @@ export class Organisme {
 
   /** Appelé avec un instantané compact tous les SNAPSHOT_INTERVAL_TICKS. */
   onSnapshot: ((tick: number, frame: Uint8Array) => void) | null = null;
+  /** Appelé avant chaque tick (pour programmer des visites, par exemple). */
+  onTick: ((tick: number) => void) | null = null;
+  /** Appelé à chaque événement du journal. */
+  onEvent: ((e: WorldEvent) => void) | null = null;
+  /** Journal des événements marquants, du plus ancien au plus récent. */
+  events: WorldEvent[] = [];
+
+  /** Lignée et âge des cases vivantes au recensement précédent (0 : morte). */
+  private prevLin: Float32Array | null = null;
+  private prevAge: Float32Array | null = null;
+  /** Dernier jour simulé entièrement raconté. */
+  private closedDay = 0;
 
   private rng: Rng;
   private nextLineageId = 1;
@@ -87,6 +104,7 @@ export class Organisme {
     this.backend.configure(stepConstants(this.params));
     for (let i = 0; i < n; i++) {
       const q = this.params;
+      this.onTick?.(this.tick);
       this.backend.tick(
         q.regenRate * regenFactor(this.tick, q.dayAmplitude, q.seasonAmplitude),
         this.seed(),
@@ -134,6 +152,7 @@ export class Organisme {
     lineage.name = o.name?.trim() || null;
     lineage.history.push(this.tick, 0, x, y);
     this.stamp(0, x, y, genome.radius * this.params.radiusScale * SPORE_RADIUS_FACTOR, lineage.id, 0, genome);
+    if (lineage.visitor) this.emit({ kind: 'depot', lineage: lineage.id, other: lineage.parentId, visitor: lineage.visitor, n: 0, cause: null, x, y });
     return lineage;
   }
 
@@ -208,6 +227,10 @@ export class Organisme {
     this.lastCensusTick = 0;
     this.nextLineageId = 1;
     this.lineages.clear();
+    this.events = [];
+    this.prevLin = null;
+    this.prevAge = null;
+    this.closedDay = 0;
     this.stats = this.emptyStats();
   }
 
@@ -245,11 +268,15 @@ export class Organisme {
       const wasAlive = l.area > 0 || l.extinctTick === null;
       l.area = a;
       if (a > l.peakArea) l.peakArea = a;
-      if (a === 0 && l.extinctTick === null && this.tick > l.bornTick) l.extinctTick = this.tick;
+      if (a === 0 && l.extinctTick === null && this.tick > l.bornTick) {
+        l.extinctTick = this.tick;
+        if (wasAlive) this.reportExtinction(l);
+      }
       if (a > 0) l.extinctTick = null;
       if (acc) this.record(l, a, this.angleToCell(acc[1], acc[2]), this.angleToCell(acc[3], acc[4]));
       else if (wasAlive && l.history.length) this.record(l, 0, l.history.at(-2)!, l.history.at(-1)!);
     }
+    this.recordTransitions(st);
     const elapsed = this.tick - this.lastCensusTick;
     this.lastCensusTick = this.tick;
     this.stats = {
@@ -263,6 +290,8 @@ export class Organisme {
     };
     const events = this.rng.poisson(this.params.sublineageRate * living * elapsed);
     for (let e = 0; e < events; e++) this.spawnSublineage(st);
+    const day = Math.floor(this.tick / TICKS_PER_DAY);
+    while (this.closedDay < day) this.closeDay(this.closedDay++, living);
     return this.stats;
   }
 
@@ -282,6 +311,8 @@ export class Organisme {
         rngSeed: this.rng.seed,
         params: this.params,
         lineages: [...this.lineages.values()],
+        events: this.events,
+        closedDay: this.closedDay,
       },
       this.getState(),
     );
@@ -312,7 +343,13 @@ export class Organisme {
     this.params = { ...DEFAULT_PARAMS, ...header.params };
     this.lineages.clear();
     // Les sauvegardes antérieures à l'histoire n'ont ni visiteur ni histoire.
-    for (const l of header.lineages) this.lineages.set(l.id, { ...l, visitor: l.visitor ?? null, dna: l.dna ?? null, history: l.history ?? [] });
+    for (const l of header.lineages) {
+      this.lineages.set(l.id, { ...l, visitor: l.visitor ?? null, dna: l.dna ?? null, history: l.history ?? [], ledger: l.ledger ?? [] });
+    }
+    this.events = header.events ?? [];
+    this.closedDay = header.closedDay ?? Math.floor(header.tick / TICKS_PER_DAY);
+    this.prevLin = null;
+    this.prevAge = null;
     this.census();
   }
 
@@ -324,6 +361,129 @@ export class Organisme {
 
   private emptyStats(): SimStats {
     return { tick: 0, livingCells: 0, biomass: 0, livingLineages: 0, totalLineages: 0, meanNutrients: 1, meanSediment: 0 };
+  }
+
+  // --- Récit ---------------------------------------------------------------
+
+  private emit(e: Omit<WorldEvent, 'tick'>): void {
+    const ev: WorldEvent = { tick: this.tick, ...e };
+    this.events.push(ev);
+    if (this.events.length > JOURNAL_SIZE) this.events.splice(0, this.events.length - JOURNAL_SIZE);
+    this.onEvent?.(ev);
+  }
+
+  /** Entrée du registre d'une lignée pour un jour donné (créée au besoin). */
+  private ledgerEntry(l: Lineage, day: number): LedgerDay {
+    const last = l.ledger.at(-1);
+    if (last && last.day === day) return last;
+    const e: LedgerDay = { day, gained: 0, faim: 0, vieillesse: 0, repli: 0, wonFrom: {}, lostTo: {} };
+    l.ledger.push(e);
+    if (l.ledger.length > LEDGER_DAYS) l.ledger.splice(0, l.ledger.length - LEDGER_DAYS);
+    return e;
+  }
+
+  /**
+   * Compare chaque case à son état au recensement précédent : conquêtes sur
+   * sol libre, cases prises à d'autres lignées, morts classées par cause.
+   */
+  private recordTransitions(st: Float32Array): void {
+    const n = this.size * this.size;
+    const lin = new Float32Array(n);
+    const age = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      if (st[i * 4] >= ALIVE_THRESHOLD && st[i * 4 + 2] > 0.5) {
+        lin[i] = st[i * 4 + 2];
+        age[i] = st[i * 4 + 3];
+      }
+    }
+    const prev = this.prevLin;
+    const prevAge = this.prevAge;
+    this.prevLin = lin;
+    this.prevAge = age;
+    if (!prev || !prevAge || this.tick === this.lastCensusTick) return;
+    const day = Math.floor((this.tick - 1) / TICKS_PER_DAY);
+    const oldAge = this.params.senescenceStartDays * TICKS_PER_DAY;
+    const entries = new Map<number, LedgerDay>();
+    const entry = (id: number) => {
+      let e = entries.get(id);
+      if (!e) {
+        const l = this.lineages.get(id);
+        if (!l) return null;
+        entries.set(id, (e = this.ledgerEntry(l, day)));
+      }
+      return e;
+    };
+    for (let i = 0; i < n; i++) {
+      const a = prev[i];
+      const b = lin[i];
+      if (a === b) continue;
+      if (a > 0 && b === 0) {
+        const cause: DeathCause = st[i * 4 + 1] < this.params.starveBelow ? 'faim' : prevAge[i] >= oldAge ? 'vieillesse' : 'repli';
+        const e = entry(a);
+        if (e) e[cause]++;
+      } else if (a === 0) {
+        const e = entry(b);
+        if (e) e.gained++;
+      } else {
+        // Une sous-lignée qui vient de naître dans sa parente n'est pas une conquête.
+        const lb = this.lineages.get(b);
+        if (lb && lb.parentId === a && lb.origin === 'sous-lignee' && lb.bornTick >= this.lastCensusTick) continue;
+        const ea = entry(a);
+        const eb = entry(b);
+        if (ea) ea.lostTo[b] = (ea.lostTo[b] ?? 0) + 1;
+        if (eb) eb.wonFrom[a] = (eb.wonFrom[a] ?? 0) + 1;
+      }
+    }
+  }
+
+  /** Raconte une extinction, avec sa cause principale sur les deux derniers jours. */
+  private reportExtinction(l: Lineage): void {
+    const recent = l.ledger.slice(-2);
+    const sum = (f: (d: LedgerDay) => number) => recent.reduce((s, d) => s + f(d), 0);
+    const lost = new Map<number, number>();
+    for (const d of recent) for (const [k, v] of Object.entries(d.lostTo)) lost.set(Number(k), (lost.get(Number(k)) ?? 0) + v);
+    const top = [...lost.entries()].sort((a, b) => b[1] - a[1])[0] ?? null;
+    const causes: [DeathCause | 'conquete', number][] = [
+      ['faim', sum((d) => d.faim)],
+      ['vieillesse', sum((d) => d.vieillesse)],
+      ['repli', sum((d) => d.repli)],
+      ['conquete', [...lost.values()].reduce((a, b) => a + b, 0)],
+    ];
+    const cause = causes.sort((a, b) => b[1] - a[1])[0];
+    const x = l.history.at(-2) ?? 0;
+    const y = l.history.at(-1) ?? 0;
+    this.emit({
+      kind: 'extinction', lineage: l.id, other: cause[0] === 'conquete' && top ? top[0] : null, visitor: l.visitor,
+      n: Math.round((this.tick - l.bornTick) / TICKS_PER_DAY), cause: cause[1] > 0 ? cause[0] : null, x, y,
+    });
+  }
+
+  /** Fin d'un jour simulé : grandes conquêtes, famine, anciennetés de familles. */
+  private closeDay(day: number, living: number): void {
+    let starved = 0;
+    for (const l of this.lineages.values()) {
+      const e = l.ledger.find((d) => d.day === day);
+      if (!e) continue;
+      starved += e.faim;
+      for (const [k, v] of Object.entries(e.wonFrom)) {
+        if (v < CONQUEST_EVENT_CELLS) continue;
+        this.emit({ kind: 'conquete', lineage: l.id, other: Number(k), visitor: l.visitor, n: v, cause: null, x: l.history.at(-2) ?? 0, y: l.history.at(-1) ?? 0 });
+      }
+    }
+    if (starved > FAMINE_EVENT_FRACTION * Math.max(living, 1)) {
+      this.emit({ kind: 'famine', lineage: 0, other: null, visitor: null, n: starved, cause: 'faim', x: 0, y: 0 });
+    }
+    const end = (day + 1) * TICKS_PER_DAY;
+    for (const l of this.lineages.values()) {
+      if (l.origin !== 'spore' || !l.visitor) continue;
+      const before = (end - TICKS_PER_DAY - l.bornTick) / TICKS_PER_DAY;
+      const after = (end - l.bornTick) / TICKS_PER_DAY;
+      const m = AGE_MILESTONES_DAYS.find((d) => before < d && d <= after);
+      if (m === undefined) continue;
+      const family = this.descendants(l.id).map((id) => this.lineages.get(id)!);
+      if (!family.some((f) => f.area > 0)) continue;
+      this.emit({ kind: 'anciennete', lineage: l.id, other: null, visitor: l.visitor, n: m, cause: null, x: l.history.at(-2) ?? 0, y: l.history.at(-1) ?? 0 });
+    }
   }
 
   /** Ajoute un point d'histoire (au plus un par tick) et éclaircit les plus anciens. */
@@ -395,6 +555,7 @@ export class Organisme {
       dna: null,
       visitor: null,
       history: [],
+      ledger: [],
     };
     this.lineages.set(l.id, l);
     return l;
@@ -439,7 +600,11 @@ export class Organisme {
       const parent = st[i * 4 + 2];
       const g = sublineageJump(this.genomeAt(i), this.rng, this.params.mutationRate);
       const l = this.registerLineage(parent, 'sous-lignee', null, g);
-      this.stamp(1, (i % this.size) + 0.5, Math.floor(i / this.size) + 0.5, SUBLINEAGE_PATCH_RADIUS, l.id, parent, g);
+      const x = (i % this.size) + 0.5;
+      const y = Math.floor(i / this.size) + 0.5;
+      l.history.push(this.tick, 0, x, y);
+      this.stamp(1, x, y, SUBLINEAGE_PATCH_RADIUS, l.id, parent, g);
+      this.emit({ kind: 'sous-lignee', lineage: l.id, other: parent, visitor: null, n: 0, cause: null, x, y });
       return;
     }
   }

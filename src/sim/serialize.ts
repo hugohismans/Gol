@@ -3,7 +3,7 @@
 
 import { GENOME_BOUNDS, SAVE_VERSION } from './config';
 import type { Params } from './config';
-import type { Lineage, SimState } from './types';
+import type { Lineage, SimState, WorldEvent } from './types';
 
 export interface SaveHeader {
   version: number;
@@ -13,6 +13,8 @@ export interface SaveHeader {
   rngSeed: number;
   params: Params;
   lineages: Lineage[];
+  events?: WorldEvent[];
+  closedDay?: number;
 }
 
 const enc = new TextEncoder();

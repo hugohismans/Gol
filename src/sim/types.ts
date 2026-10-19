@@ -36,6 +36,41 @@ export interface Dna {
 
 export type LineageOrigin = 'spore' | 'sous-lignee';
 
+/** Pourquoi une case vivante meurt : faim, grand âge, ou repli (la dynamique elle même). */
+export type DeathCause = 'faim' | 'vieillesse' | 'repli';
+
+/** Ce qui est arrivé à une lignée pendant un jour simulé. */
+export interface LedgerDay {
+  day: number;
+  /** Cases conquises sur un sol libre. */
+  gained: number;
+  /** Cases mortes, par cause. */
+  faim: number;
+  vieillesse: number;
+  repli: number;
+  /** Cases prises à d'autres lignées (id : nombre), et cédées à d'autres. */
+  wonFrom: Record<number, number>;
+  lostTo: Record<number, number>;
+}
+
+export type WorldEventKind = 'depot' | 'sous-lignee' | 'extinction' | 'conquete' | 'famine' | 'anciennete';
+
+/** Ce qui mérite d'être raconté. Données brutes : le texte est composé par l'interface. */
+export interface WorldEvent {
+  tick: number;
+  kind: WorldEventKind;
+  lineage: number;
+  /** Lignée en face (conquête), ou parente (dépôt, sous-lignée). */
+  other: number | null;
+  visitor: string | null;
+  /** Nombre de cases, ou de jours pour l'ancienneté. */
+  n: number;
+  /** Cause d'une extinction. */
+  cause: DeathCause | 'conquete' | null;
+  x: number;
+  y: number;
+}
+
 export interface Lineage {
   id: number;
   parentId: number | null;
@@ -59,6 +94,8 @@ export interface Lineage {
    * x, y répétés (x, y = centre du territoire sur le tore, en cases).
    */
   history: number[];
+  /** Ce qui lui est arrivé, jour par jour (les derniers jours seulement). */
+  ledger: LedgerDay[];
 }
 
 /** Instantané lisible côté CPU (une valeur par case, ligne par ligne). */

@@ -299,6 +299,23 @@ export const SNAPSHOT_INTERVAL_TICKS = 600;
 /** Jours récents où tous les instantanés sont gardés ; plus ancien : un par jour. */
 export const SNAPSHOT_RECENT_DAYS = 7;
 
+// --- Récit -------------------------------------------------------------------
+
+/** Jours de registre conservés par lignée. */
+export const LEDGER_DAYS = 90;
+
+/** Événements du journal conservés. */
+export const JOURNAL_SIZE = 400;
+
+/** Cases prises en un jour à partir desquelles une conquête est racontée. */
+export const CONQUEST_EVENT_CELLS = 120;
+
+/** Part des cases vivantes mortes de faim en un jour à partir de laquelle on parle de famine. */
+export const FAMINE_EVENT_FRACTION = 0.25;
+
+/** Âges (en jours) d'une famille qui méritent d'être signalés. */
+export const AGE_MILESTONES_DAYS = [1, 3, 7, 14, 30, 60, 100, 365];
+
 // --- Persistance ---------------------------------------------------------
 
 /** Version du format de sauvegarde. */
