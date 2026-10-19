@@ -3,9 +3,10 @@
   import { Engine } from './ui/engine.svelte';
   import Hud from './ui/Hud.svelte';
   import TimeBar from './ui/TimeBar.svelte';
-  import MutationBar from './ui/MutationBar.svelte';
   import DebugPanel from './ui/DebugPanel.svelte';
   import MySpores from './ui/MySpores.svelte';
+  import Registre from './ui/Registre.svelte';
+  import EprouvettePanel from './ui/Eprouvette.svelte';
   import ReplayBar from './ui/ReplayBar.svelte';
 
   const engine = new Engine();
@@ -49,21 +50,27 @@
   <div class="error">{engine.error}</div>
 {:else}
   <Hud {engine} />
-  <div class="bottom" class:beside={engine.sporesOpen}>
+  {@const side = engine.panel === 'spores' || engine.panel === 'registre'}
+  <div class="bottom" class:beside={side}>
     {#if engine.replay}
       <ReplayBar {engine} />
-    {:else}
+    {:else if !engine.pending}
       <TimeBar {engine} />
-      <MutationBar {engine} />
+      <div class="hint">toucher le monde pour préparer une spore</div>
     {/if}
   </div>
+  <Registre {engine} />
   <MySpores {engine} />
   <DebugPanel {engine} />
-  <div class="tools" class:raised={engine.sporesOpen || engine.debugOpen}>
-    <button class:on={engine.sporesOpen} onclick={() => engine.toggleSpores()} aria-expanded={engine.sporesOpen}>
+  {#if engine.pending}
+    <EprouvettePanel {engine} />
+  {/if}
+  <div class="tools" class:raised={engine.panel !== null}>
+    <button class:on={engine.panel === 'registre'} onclick={() => engine.openPanel('registre')} aria-expanded={engine.panel === 'registre'}>registre</button>
+    <button class:on={engine.panel === 'spores'} onclick={() => engine.openPanel('spores')} aria-expanded={engine.panel === 'spores'}>
       mes spores{engine.spores.length ? ` · ${engine.spores.length}` : ''}
     </button>
-    <button class:on={engine.debugOpen} onclick={() => engine.toggleDebug()} aria-expanded={engine.debugOpen}>réglages</button>
+    <button class:on={engine.panel === 'reglages'} onclick={() => engine.openPanel('reglages')} aria-expanded={engine.panel === 'reglages'}>réglages</button>
   </div>
 {/if}
 
@@ -99,6 +106,14 @@
 
   .bottom > :global(*) {
     pointer-events: auto;
+  }
+
+  .hint {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 0.8rem;
+    color: var(--ink-dim);
+    text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
   }
 
   .tools {

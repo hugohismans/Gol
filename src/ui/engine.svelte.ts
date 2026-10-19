@@ -7,14 +7,15 @@ import type { SimDate } from '../sim/calendar';
 import { Organisme } from '../sim/organisme';
 import { GpuBackend } from '../sim/gpu/backend';
 import { GRID_SIZE } from '../sim/config';
-import type { MutationKind, SimStats } from '../sim/types';
+import type { Dna, Genome, SimStats } from '../sim/types';
+import { NEUTRAL_DNA, applyDna, isValidDna } from '../sim/genome';
 import { FrameTextures, Renderer } from '../render/renderer';
 import type { Layer, RenderOptions, View, ViewMode } from '../render/renderer';
 import { clearWorld, loadPrefs, loadWorld, savePrefs, saveWorld } from '../persistence';
 import { clearFrames, getFrame, listTicks, pruneFrames, putFrame, useWorldSize } from '../history';
 import { decodeFrame } from '../sim/frame';
-import { ME, lineageStory, mySpores, placeAt } from './story';
-import type { SporeCard, Story } from './story';
+import { lineageStory, mySpores, placeAt, registry } from './story';
+import type { RegistryRow, RegistryTab, SporeCard, Story } from './story';
 
 /** Bornes du nombre de ticks joués par image, ajusté selon la fluidité. */
 const MIN_TICKS_PER_FRAME = 1;
@@ -40,20 +41,41 @@ export interface Replay {
 
 export type Speed = (typeof SPEEDS)[number];
 
+export type Panel = 'registre' | 'spores' | 'reglages';
+
+/** Spore en préparation dans l'éprouvette : lieu choisi et génome prélevé. */
+export interface PendingSpore {
+  x: number;
+  y: number;
+  parentId: number | null;
+  base: Genome;
+}
+
 interface Prefs {
   speed: Speed;
   layer: Layer;
   view: ViewMode;
-  mutation: MutationKind;
-  debugOpen: boolean;
+  pseudo: string;
+  dna: Dna;
+  name: string;
+  eprouvette: boolean;
 }
 
 export class Engine {
   speed = $state<Speed>(1);
   layer = $state<Layer>('final');
   view = $state<ViewMode>('mosaique');
-  mutation = $state<MutationKind>('gourmande');
-  debugOpen = $state(false);
+  /** Panneau latéral ouvert. */
+  panel = $state<Panel | null>(null);
+  pseudo = $state('');
+  /** ADN et nom préparés pour la prochaine spore. */
+  dna = $state<Dna>({ ...NEUTRAL_DNA });
+  name = $state('');
+  /** Passer par l'éprouvette avant chaque dépôt. */
+  eprouvette = $state(true);
+  pending = $state<PendingSpore | null>(null);
+  registryTab = $state<RegistryTab>('doyennes');
+  registry = $state<RegistryRow[]>([]);
   params = $state<Params>({ ...DEFAULT_PARAMS });
   stats = $state<SimStats | null>(null);
   date = $state<SimDate>(dateOf(0));
@@ -66,7 +88,6 @@ export class Engine {
   sizeCells = $state(0);
   /** Spores déposées par le visiteur. */
   spores = $state<SporeCard[]>([]);
-  sporesOpen = $state(false);
   /** Lignée dont on lit l'histoire (et qui est mise en évidence). */
   selected = $state<number | null>(null);
   story = $state<Story | null>(null);
@@ -95,6 +116,7 @@ export class Engine {
     this.canvas = canvas;
     const prefs = loadPrefs<Prefs>();
     Object.assign(this, prefs);
+    if (!prefs.dna || !isValidDna(prefs.dna)) this.dna = { ...NEUTRAL_DNA };
     const gl = canvas.getContext('webgl2', { antialias: false, alpha: false, powerPreference: 'high-performance' });
     if (!gl) {
       this.error = "WebGL2 n'est pas disponible dans ce navigateur.";
@@ -200,6 +222,7 @@ export class Engine {
 
   /** Mise en évidence de la lignée choisie et anneau sur son lieu, au tick affiché. */
   private highlight(tick: number, now: number): Pick<RenderOptions, 'focus' | 'marker'> {
+    if (this.pending) return { marker: { x: this.pending.x, y: this.pending.y, strength: 1 } };
     if (this.selected === null || !this.story) return {};
     const l = this.sim.lineages.get(this.selected);
     if (!l) return {};
@@ -216,8 +239,9 @@ export class Engine {
     this.stats = { ...this.sim.stats };
     this.date = dateOf(this.replay && this.frameTex.tick >= 0 ? this.frameTex.tick : this.sim.tick);
     this.shownTick = this.replay && this.frameTex.tick >= 0 ? this.frameTex.tick : this.sim.tick;
-    this.spores = mySpores(this.sim);
-    this.story = this.selected !== null ? lineageStory(this.sim, this.selected) : null;
+    this.spores = mySpores(this.sim, this.pseudo);
+    this.story = this.selected !== null ? lineageStory(this.sim, this.selected, this.pseudo) : null;
+    if (this.panel === 'registre') this.registry = registry(this.sim, this.registryTab, this.pseudo);
     const w = this.tickWindow;
     if (w.length > 1) {
       const span = (w[w.length - 1].t - w[0].t) / 1000;
@@ -248,26 +272,56 @@ export class Engine {
     const p = Renderer.screenToWorld(sx, sy, this.canvas.height, v, this.sim.size);
     if (v.clip && !p.inside) return;
     if (this.replay) return;
-    this.sim.spawnSpore(p.x, p.y, this.mutation, ME);
+    // Le génome est prélevé là où l'on touche : c'est celui dont la spore hérite.
+    const base = this.sim.inheritedGenome(p.x, p.y);
+    this.pending = { x: p.x, y: p.y, parentId: base.lineage, base: base.genome };
+    if (!this.eprouvette && isValidDna(this.dna) && this.pseudo) this.release();
+  }
+
+  // --- Éprouvette ----------------------------------------------------------
+
+  /** Génome de la spore préparée, ou null tant que l'ADN n'est pas équilibré. */
+  preparedGenome(): Genome | null {
+    return this.pending && isValidDna(this.dna) ? applyDna(this.pending.base, this.dna) : null;
+  }
+
+  /** Lâche la spore préparée dans le monde. */
+  release(): void {
+    const p = this.pending;
+    const genome = this.preparedGenome();
+    if (!p || !genome || !this.pseudo.trim()) return;
+    const l = this.sim.plant(p.x, p.y, genome, {
+      parentId: p.parentId,
+      visitor: this.pseudo.trim(),
+      dna: { ...this.dna },
+      name: this.name,
+    });
+    this.pending = null;
+    this.name = '';
     this.renderer.markSpore(p.x, p.y, (performance.now() - this.startTime) / 1000);
     this.sim.census();
     // Un instantané au moment du dépôt, pour que la relecture parte de là.
     putFrame(this.sim.tick, this.sim.snapshot());
+    this.persistPrefs();
+    this.selected = l.id;
     this.refreshUi();
   }
 
-  // --- Mes spores ----------------------------------------------------------
-
-  toggleSpores(): void {
-    this.sporesOpen = !this.sporesOpen;
-    if (this.sporesOpen) this.debugOpen = false;
-    else if (!this.replay) this.select(null);
+  cancelPending(): void {
+    this.pending = null;
   }
 
-  toggleDebug(): void {
-    this.debugOpen = !this.debugOpen;
-    if (this.debugOpen) this.sporesOpen = false;
-    this.persistPrefs();
+  // --- Panneaux -------------------------------------------------------------
+
+  openPanel(p: Panel): void {
+    this.panel = this.panel === p ? null : p;
+    if (!this.replay) this.selected = null;
+    this.refreshUi();
+  }
+
+  setRegistryTab(t: RegistryTab): void {
+    this.registryTab = t;
+    this.refreshUi();
   }
 
   select(id: number | null): void {
@@ -392,7 +446,10 @@ export class Engine {
   }
 
   persistPrefs(): void {
-    savePrefs({ speed: this.speed, layer: this.layer, view: this.view, mutation: this.mutation, debugOpen: this.debugOpen });
+    const prefs: Prefs = {
+      speed: this.speed, layer: this.layer, view: this.view, pseudo: this.pseudo, dna: this.dna, name: this.name, eprouvette: this.eprouvette,
+    };
+    savePrefs(prefs);
   }
 
   async save(): Promise<void> {

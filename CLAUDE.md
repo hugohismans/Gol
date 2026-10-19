@@ -47,3 +47,4 @@ Phase 3 : lignées nommées, arbre généalogique, snapshots R2, timelapse.
 - Fertilité du sol : la régénération varie dans l'espace selon une carte douce qui dérive en quelques semaines (fertilityContrast, 0 = sol uniforme).
 - Sénescence : une case vivante décline après quelques jours d'âge.
 - Nutriments initiaux réglables (initialNutrients).
+- Décidé avec l'auteur : la mutation unique est remplacée par un ADN à budget équilibré (4 gènes, niveaux de -3 à +3, somme nulle : chaque gain de vigueur se paie par de la retenue) plus une teinte libre ; une éprouvette montre la spore seule pendant un jour simulé avant de la lâcher ; pseudo du visiteur et nom de lignée ; registre des familles (doyennes, étendues, prolifiques). Le serveur devra revalider l'ADN (isValidDna).

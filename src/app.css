@@ -58,3 +58,59 @@ button:focus-visible {
   outline: 1px solid var(--accent);
   outline-offset: 2px;
 }
+
+/* Panneau latéral gauche (mes spores, registre) ; feuille du bas sur mobile. */
+.side-panel {
+  position: absolute;
+  z-index: 2;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: min(360px, 100vw);
+  padding: calc(76px + env(safe-area-inset-top)) 16px calc(24px + env(safe-area-inset-bottom));
+  overflow-y: auto;
+  background: rgba(12, 10, 9, 0.88);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-right: 1px solid var(--line);
+  font-size: 0.82rem;
+}
+
+@media (max-width: 600px) {
+  .side-panel {
+    top: auto;
+    width: 100%;
+    height: var(--sheet, 62vh);
+    padding-top: 16px;
+    border-right: 0;
+    border-top: 1px solid var(--line);
+    border-radius: 16px 16px 0 0;
+  }
+}
+
+.side-panel h2 {
+  margin: 0;
+  font-family: var(--serif);
+  font-weight: normal;
+  font-size: 1.1rem;
+}
+
+.dot {
+  flex: none;
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  box-shadow: 0 0 10px rgba(255, 245, 225, 0.18);
+}
+
+.dot.dead {
+  opacity: 0.35;
+  box-shadow: none;
+}
+
+.sub {
+  margin: 2px 0 0;
+  color: var(--ink-dim);
+  font-size: 0.75rem;
+}

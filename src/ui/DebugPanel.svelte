@@ -68,7 +68,7 @@
   </label>
 {/snippet}
 
-{#if engine.debugOpen}
+{#if engine.panel === 'reglages'}
   <aside class="panel">
     <section>
       <h2>Calques</h2>
@@ -95,6 +95,17 @@
         <button class:danger={confirmReset} onclick={reset}>{confirmReset ? 'confirmer le reset' : 'reset'}</button>
         <button onclick={() => engine.save()}>sauvegarder</button>
       </div>
+      <label class="check">
+        <input
+          type="checkbox"
+          checked={engine.eprouvette}
+          onchange={(e) => {
+            engine.eprouvette = (e.currentTarget as HTMLInputElement).checked;
+            engine.persistPrefs();
+          }}
+        />
+        passer par l'éprouvette avant chaque dépôt (sinon : dépôt direct avec le dernier ADN)
+      </label>
       {#if engine.stats}
         <p class="info">
           biomasse {engine.stats.biomass.toFixed(0)} · nutriments moyens {engine.stats.meanNutrients.toFixed(2)} · lignées
@@ -172,6 +183,15 @@
   .danger {
     border-color: #a0624f;
     color: #e5a08c;
+  }
+
+  .check {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    margin-top: 10px;
+    color: var(--ink-dim);
+    line-height: 1.35;
   }
 
   .info {

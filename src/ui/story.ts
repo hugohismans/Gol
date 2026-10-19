@@ -5,10 +5,30 @@ import { dateOf } from '../sim/calendar';
 import { CENSUS_INTERVAL_TICKS, TICKS_PER_DAY } from '../sim/config';
 import { hueColor } from '../sim/cpu/backend';
 import type { Organisme } from '../sim/organisme';
-import type { Lineage, MutationKind } from '../sim/types';
+import { DNA_GENES } from '../sim/types';
+import type { Dna, DnaGene, Lineage, MutationKind } from '../sim/types';
 
-/** Identité du visiteur dans le prototype (un cookie en phase 2). */
-export const ME = 'moi';
+/** Visiteur des spores déposées avant les pseudos. */
+const LEGACY_ME = 'moi';
+
+export function isMine(visitor: string | null, pseudo: string): boolean {
+  return visitor !== null && (visitor === LEGACY_ME || (pseudo !== '' && visitor === pseudo));
+}
+
+export const GENE_LABELS: Record<DnaGene, [string, string]> = {
+  appetit: ['sobre', 'gourmande'],
+  envergure: ['compacte', 'expansive'],
+  tolerance: ['exigeante', 'tolérante'],
+  audace: ['prudente', 'audacieuse'],
+};
+
+/** Résumé lisible d'un ADN : les gènes déplacés, du plus marqué au moins marqué. */
+export function dnaSummary(d: Dna): string {
+  const parts = DNA_GENES.filter((g) => d[g] !== 0)
+    .sort((a, b) => Math.abs(d[b]) - Math.abs(d[a]))
+    .map((g) => `${GENE_LABELS[g][d[g] > 0 ? 1 : 0]} ${'+'.repeat(Math.abs(d[g]))}`);
+  return parts.length ? parts.join(', ') : 'ADN hérité, sans retouche';
+}
 
 /** Déplacement (en cases) au delà duquel on raconte une migration. */
 const MIGRATION_CELLS = 30;
@@ -23,8 +43,11 @@ export const MUTATION_LABELS: Record<MutationKind, string> = {
 
 export interface SporeCard {
   id: number;
+  name: string | null;
+  visitor: string | null;
   color: string;
   mutation: MutationKind | null;
+  dna: Dna | null;
   bornTick: number;
   area: number;
   peakArea: number;
@@ -78,8 +101,11 @@ export function sporeCard(sim: Organisme, l: Lineage): SporeCard {
   const alive = family.filter((d) => d.area > 0);
   return {
     id: l.id,
+    name: l.name,
+    visitor: l.visitor,
     color: lineageColor(l.founder.hue),
     mutation: l.mutation,
+    dna: l.dna,
     bornTick: l.bornTick,
     area: l.area,
     peakArea: l.peakArea,
@@ -90,9 +116,9 @@ export function sporeCard(sim: Organisme, l: Lineage): SporeCard {
 }
 
 /** Les spores déposées par le visiteur, les plus récentes d'abord. */
-export function mySpores(sim: Organisme): SporeCard[] {
+export function mySpores(sim: Organisme, pseudo: string): SporeCard[] {
   return [...sim.lineages.values()]
-    .filter((l) => l.visitor === ME)
+    .filter((l) => isMine(l.visitor, pseudo))
     .sort((a, b) => b.bornTick - a.bornTick)
     .map((l) => sporeCard(sim, l));
 }
@@ -112,7 +138,7 @@ export function placeAt(l: Lineage, t: number): { x: number; y: number; area: nu
   return p;
 }
 
-export function lineageStory(sim: Organisme, id: number): Story | null {
+export function lineageStory(sim: Organisme, id: number, pseudo: string): Story | null {
   const l = sim.lineages.get(id);
   if (!l) return null;
   const familyIds = sim.descendants(id);
@@ -131,10 +157,11 @@ export function lineageStory(sim: Organisme, id: number): Story | null {
 
   const events: StoryEvent[] = [];
   const parent = l.parentId ? sim.lineages.get(l.parentId) : null;
-  const how = l.mutation ? `, mutation ${MUTATION_LABELS[l.mutation]}` : '';
+  const how = l.dna ? ` ; ADN : ${dnaSummary(l.dna)}` : l.mutation ? `, mutation ${MUTATION_LABELS[l.mutation]}` : '';
+  const who = l.visitor ? (isMine(l.visitor, pseudo) ? 'Tu l’as déposée' : `${l.visitor} l’a déposée`) : 'Déposée';
   events.push({
     tick: l.bornTick,
-    text: parent ? `Déposée près de la lignée n°${parent.id}, dont elle hérite${how}.` : `Déposée sur un sol vide${how}.`,
+    text: parent ? `${who} près de la lignée n°${parent.id}, dont elle hérite${how}.` : `${who} sur un sol vide${how}.`,
   });
 
   let peak = { tick: l.bornTick, area: 0 };
@@ -158,7 +185,7 @@ export function lineageStory(sim: Organisme, id: number): Story | null {
   }
 
   for (const d of family.slice(1)) {
-    const by = d.visitor === ME ? 'par toi' : d.visitor ? 'par un visiteur' : '';
+    const by = isMine(d.visitor, pseudo) ? 'par toi' : d.visitor ? `par ${d.visitor}` : '';
     const text =
       d.origin === 'sous-lignee'
         ? `Une sous-lignée apparaît : n°${d.id}${d.parentId !== id ? ` (issue de n°${d.parentId})` : ''}.`
@@ -179,4 +206,69 @@ export function lineageStory(sim: Organisme, id: number): Story | null {
 
 function torus(d: number, size: number): number {
   return Math.abs(d - size * Math.round(d / size));
+}
+
+// --- Registre ---------------------------------------------------------------
+
+export type RegistryTab = 'doyennes' | 'etendues' | 'prolifiques';
+
+export interface RegistryRow {
+  id: number;
+  name: string | null;
+  color: string;
+  /** Pseudo de qui l'a déposée, ou null pour une graine du monde. */
+  visitor: string | null;
+  mine: boolean;
+  value: number;
+  label: string;
+  familyAlive: boolean;
+}
+
+const REGISTRY_SIZE = 20;
+
+/**
+ * Classement des familles fondées par une spore (la lignée et toutes ses
+ * descendantes) : doyennes (depuis quand la famille survit), étendues (surface
+ * vivante), prolifiques (nombre de descendantes apparues).
+ */
+export function registry(sim: Organisme, tab: RegistryTab, pseudo: string): RegistryRow[] {
+  const children = new Map<number, number[]>();
+  for (const l of sim.lineages.values()) {
+    if (l.parentId === null) continue;
+    const c = children.get(l.parentId);
+    if (c) c.push(l.id);
+    else children.set(l.parentId, [l.id]);
+  }
+  const family = (id: number) => {
+    const out = [id];
+    for (let i = 0; i < out.length; i++) out.push(...(children.get(out[i]) ?? []));
+    return out;
+  };
+  const rows: RegistryRow[] = [];
+  for (const l of sim.lineages.values()) {
+    if (l.origin !== 'spore') continue;
+    const members = family(l.id).map((i) => sim.lineages.get(i)!);
+    const area = members.reduce((s, m) => s + m.area, 0);
+    const alive = area > 0;
+    let value: number;
+    let label: string;
+    if (tab === 'doyennes') {
+      if (!alive) continue;
+      value = sim.tick - l.bornTick;
+      label = formatDuration(value);
+    } else if (tab === 'etendues') {
+      if (!alive) continue;
+      value = area;
+      label = `${area} cases`;
+    } else {
+      value = members.length - 1;
+      if (value === 0) continue;
+      label = `${value} descendante${value > 1 ? 's' : ''}`;
+    }
+    rows.push({
+      id: l.id, name: l.name, color: lineageColor(l.founder.hue), visitor: l.visitor, mine: isMine(l.visitor, pseudo),
+      value, label, familyAlive: alive,
+    });
+  }
+  return rows.sort((a, b) => b.value - a.value || a.id - b.id).slice(0, REGISTRY_SIZE);
 }
